@@ -3,6 +3,44 @@
 import { prisma } from "@/lib/prisma";
 import { serializeBigInt } from "@/lib/utils";
 import bcrypt from "bcrypt";
+import { z } from "zod";
+import { Resend } from "resend";
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Rate limiting en memoria (Anti-DDoS básico)
+const rateLimits = new Map<string, { count: number; resetTime: number }>();
+
+function checkRateLimit(token: string) {
+  const now = Date.now();
+  const limit = rateLimits.get(token);
+
+  if (limit) {
+    if (now > limit.resetTime) {
+      rateLimits.set(token, { count: 1, resetTime: now + 60000 }); // 1 minuto
+    } else {
+      if (limit.count >= 10) {
+        throw new Error("Límite de solicitudes excedido. Intenta de nuevo en 1 minuto.");
+      }
+      limit.count++;
+    }
+  } else {
+    rateLimits.set(token, { count: 1, resetTime: now + 60000 });
+  }
+}
+
+// Esquemas de Validación (Zod)
+const pasajeroSchema = z.object({
+  nombres: z.string().regex(/^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/, "Formato inválido").max(50),
+  apellidos: z.string().regex(/^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/, "Formato inválido").max(50),
+  dni: z.string().regex(/^\d{8}$/, "DNI debe tener 8 números"),
+  telefono: z.string().regex(/^\d{9}$/, "Celular debe tener 9 números").optional().or(z.literal('')),
+});
+
+const checkoutSchema = z.array(z.object({
+  seatId: z.string(),
+  pasajeroData: pasajeroSchema
+}));
 
 // Función auxiliar para liberar asientos bloqueados que ya excedieron los 8 minutos
 export async function limpiarBloqueosExpirados() {
@@ -18,8 +56,9 @@ export async function limpiarBloqueosExpirados() {
       data: {
         estado: "disponible",
         bloqueado_por_usuario_id: null,
+        bloqueado_por_token: null,
         bloqueado_en: null,
-      },
+      } as any,
     });
   } catch (error) {
     console.error("Error limpiando bloqueos de asientos expirados:", error);
@@ -71,10 +110,23 @@ export async function searchTrips(originId: string, destinationId: string, date:
   try {
     await limpiarBloqueosExpirados();
     
-    const startDate = new Date(date);
-    startDate.setUTCHours(0, 0, 0, 0);
-    const endDate = new Date(date);
-    endDate.setUTCHours(23, 59, 59, 999);
+    // La base de datos guarda la hora local (Perú) como si fuera UTC (naive timestamp).
+    // Por lo tanto, creamos las fechas de búsqueda en UTC explícitamente.
+    const startDate = new Date(`${date}T00:00:00.000Z`);
+    const endDate = new Date(`${date}T23:59:59.999Z`);
+
+    // Para filtrar viajes que ya pasaron, obtenemos la hora actual en Perú
+    // y creamos una fecha UTC "falsa" para compararla con la base de datos.
+    const nowPeruStr = new Date().toLocaleString("en-US", { timeZone: "America/Lima" });
+    const nowPeru = new Date(nowPeruStr);
+    const nowFakeUTC = new Date(Date.UTC(
+      nowPeru.getFullYear(), nowPeru.getMonth(), nowPeru.getDate(), 
+      nowPeru.getHours(), nowPeru.getMinutes(), nowPeru.getSeconds()
+    ));
+
+    // Solo mostrar viajes que ocurran dentro del día solicitado
+    // Y que la fecha de salida sea MAYOR a la hora actual en Perú
+    const filterStartDate = nowFakeUTC > startDate ? nowFakeUTC : startDate;
 
     const trips = await prisma.viaje.findMany({
       where: {
@@ -83,7 +135,7 @@ export async function searchTrips(originId: string, destinationId: string, date:
           destino_id: BigInt(destinationId),
         },
         fecha_salida: {
-          gte: startDate,
+          gte: filterStartDate,
           lte: endDate,
         },
       },
@@ -102,7 +154,12 @@ export async function searchTrips(originId: string, destinationId: string, date:
       let timeStr = "";
       if (trip.fecha_salida) {
         const d = new Date(trip.fecha_salida);
-        timeStr = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+        timeStr = d.toLocaleTimeString("en-US", {
+          timeZone: "UTC", // Tratar el valor de la DB como hora local sin conversión
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        });
       }
 
       let available = 0;
@@ -1028,9 +1085,53 @@ export async function updateViaje(id: string, data: { ruta_id: string; bus_id: s
   }
 }
 
+export async function crearOrdenCulqi(amount: number, email: string, firstName: string, lastName: string, phone: string) {
+  try {
+    const SECRET_KEY = process.env.CULQI_SECRET_KEY;
+    if (!SECRET_KEY) {
+      throw new Error("CULQI_SECRET_KEY no está configurada en las variables de entorno.");
+    }
+
+    const response = await fetch("https://api.culqi.com/v2/orders", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${SECRET_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: Math.round(amount * 100),
+        currency_code: "PEN",
+        description: "Pasajes de Bus El Cumbe",
+        order_number: `CUMBE-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        client_details: {
+          first_name: firstName || "Cliente",
+          last_name: lastName || "Cumbe",
+          email: email,
+          phone_number: phone || "+51900000000"
+        },
+        expiration_date: Math.floor(Date.now() / 1000) + 24 * 60 * 60 // Expira en 1 día
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      console.error("Culqi Order Error Response:", data);
+      return { success: false, error: data.user_message || "Error al crear la orden" };
+    }
+
+    return { success: true, orderId: data.id };
+  } catch (error: any) {
+    console.error("Error al crear orden en Culqi:", error);
+    return { success: false, error: error.message || "Error de conexión" };
+  }
+}
+
 export async function crearCargoCulqi(tokenId: string, email: string, amount: number) {
   try {
-    const SECRET_KEY = process.env.CULQI_SECRET_KEY || "sk_test_1f3b83984d5df687";
+    const SECRET_KEY = process.env.CULQI_SECRET_KEY;
+    if (!SECRET_KEY) {
+      throw new Error("CULQI_SECRET_KEY no está configurada en las variables de entorno.");
+    }
 
     const response = await fetch("https://api.culqi.com/v2/charges", {
       method: "POST",
@@ -1058,15 +1159,25 @@ export async function crearCargoCulqi(tokenId: string, email: string, amount: nu
   }
 }
 
-export async function procesarPagoExitosoCulqi(
+export async function procesarPagoMultiplesAsientosCulqi(
   viajeId: string,
-  seatId: string,
-  pasajeroData: { nombres: string; apellidos: string; dni: string; telefono?: string },
+  asientosPasajeros: {
+    seatId: string;
+    pasajeroData: { nombres: string; apellidos: string; dni: string; telefono?: string };
+  }[],
   amount: number,
   chargeId: string,
   email?: string
 ) {
   try {
+    // Validación de seguridad estricta en el servidor con Zod
+    try {
+      checkoutSchema.parse(asientosPasajeros);
+    } catch (e: any) {
+      console.error("Fallo de validación Zod:", e.errors);
+      return { success: false, error: "Datos de pasajeros inválidos, manipulados o con formato incorrecto." };
+    }
+
     let userId: bigint | null = null;
     if (email) {
       const user = await prisma.cliente.findUnique({ where: { correo: email } });
@@ -1076,53 +1187,63 @@ export async function procesarPagoExitosoCulqi(
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      // 1. Registrar el pago
-      await tx.pago.create({
-        data: {
-          viaje_id: BigInt(viajeId),
-          asiento_id: BigInt(seatId),
-          preference_id: chargeId,
-          status: "approved",
-          amount: amount,
-        },
-      });
+      const tickets = [];
+      const paymentAmountPerSeat = amount / asientosPasajeros.length;
 
-      // 2. Actualizar el asiento a vendido
-      await tx.asientoViaje.update({
-        where: { id: BigInt(seatId) },
-        data: {
-          estado: "vendido",
-          bloqueado_por_usuario_id: userId,
-        },
-      });
+      for (const item of asientosPasajeros) {
+        // 1. Registrar el pago proporcional por cada asiento para mantener consistencia contable
+        await tx.pago.create({
+          data: {
+            viaje_id: BigInt(viajeId),
+            asiento_id: BigInt(item.seatId),
+            preference_id: chargeId,
+            status: "approved",
+            amount: paymentAmountPerSeat,
+          },
+        });
 
-      // 3. Crear el ticket/pasaje
-      const ticket = await tx.pasaje.create({
-        data: {
-          asiento_viaje_id: BigInt(seatId),
-          nombres: pasajeroData.nombres,
-          apellidos: pasajeroData.apellidos,
-          dni: pasajeroData.dni,
-          telefono: pasajeroData.telefono || null,
-          usuario_id: userId,
-          precio: amount,
-          codigo_qr: `QR-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Date.now()}`,
-        },
-      });
+        // 2. Actualizar el asiento a vendido
+        await tx.asientoViaje.update({
+          where: { id: BigInt(item.seatId) },
+          data: {
+            estado: "vendido",
+            bloqueado_por_usuario_id: userId,
+            bloqueado_por_token: null,
+          } as any,
+        });
 
-      return ticket;
+        // 3. Crear el ticket/pasaje para el pasajero específico
+        const ticket = await tx.pasaje.create({
+          data: {
+            asiento_viaje_id: BigInt(item.seatId),
+            nombres: item.pasajeroData.nombres,
+            apellidos: item.pasajeroData.apellidos,
+            dni: item.pasajeroData.dni,
+            telefono: item.pasajeroData.telefono || null,
+            usuario_id: userId,
+            precio: paymentAmountPerSeat,
+            codigo_qr: `QR-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Date.now()}`,
+          },
+        });
+        tickets.push(ticket);
+      }
+
+      return tickets;
     });
 
-    return { success: true, ticket: serializeBigInt(result) };
+    return { success: true, tickets: serializeBigInt(result) };
   } catch (error: any) {
-    console.error("Error al registrar pasaje con Culqi:", error);
-    return { success: false, error: error.message || "Error al emitir el pasaje en la base de datos." };
+    console.error("Error al registrar pasajes con Culqi:", error);
+    return { success: false, error: error.message || "Error al emitir los pasajes en la base de datos." };
   }
 }
 
-// 27. marcarAsientoPendiente
-export async function marcarAsientoPendiente(seatId: string, email?: string) {
+// 27. marcarAsientosPendientes
+export async function marcarAsientosPendientes(seatIds: string[], guestToken: string, email?: string) {
   try {
+    const rateKey = email || guestToken || "anonymous";
+    checkRateLimit(rateKey);
+
     await limpiarBloqueosExpirados();
     
     let userId: bigint | null = null;
@@ -1134,52 +1255,159 @@ export async function marcarAsientoPendiente(seatId: string, email?: string) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const seat = await tx.asientoViaje.findUnique({
-        where: { id: BigInt(seatId) },
+      // Solo auto-liberamos los asientos del usuario que NO están en la solicitud actual.
+      // Si piden un asiento que ya tienen bloqueado (por ejemplo desde otra pestaña), lanzará error.
+      const releaseCondition: any = userId 
+        ? { bloqueado_por_usuario_id: userId, estado: "pendiente" } 
+        : { bloqueado_por_token: guestToken, estado: "pendiente" };
+
+      await tx.asientoViaje.updateMany({
+        where: {
+          ...releaseCondition,
+          id: { notIn: seatIds.map(id => BigInt(id)) }
+        },
+        data: {
+          estado: "disponible",
+          bloqueado_por_usuario_id: null,
+          bloqueado_por_token: null,
+          bloqueado_en: null,
+        } as any,
       });
 
-      if (!seat || (seat.estado !== "disponible" && seat.bloqueado_por_usuario_id !== userId)) {
-        throw new Error("El asiento seleccionado ya no se encuentra disponible.");
+      // Verificar que no se pidan más de 6 asientos en esta solicitud
+      if (seatIds.length > 6) {
+        throw new Error("No puedes seleccionar más de 6 asientos a la vez.");
       }
 
-      const updatedSeat = await tx.asientoViaje.update({
-        where: { id: BigInt(seatId) },
+      const seats = await tx.asientoViaje.findMany({
+        where: { id: { in: seatIds.map(id => BigInt(id)) } },
+      });
+
+      if (seats.length !== seatIds.length) {
+        throw new Error("No se encontraron algunos de los asientos seleccionados.");
+      }
+
+      for (const seat of seats) {
+        if (!seat || seat.estado !== "disponible") {
+          throw new Error(`El asiento ${seat.numero_asiento} ya ha sido tomado o bloqueado en otra pestaña.`);
+        }
+      }
+
+      const updatedSeats = await tx.asientoViaje.updateMany({
+        where: { id: { in: seatIds.map(id => BigInt(id)) } },
         data: {
           estado: "pendiente",
           bloqueado_por_usuario_id: userId,
+          bloqueado_por_token: guestToken,
           bloqueado_en: new Date(),
-        },
+        } as any,
       });
 
-      return updatedSeat;
+      return updatedSeats;
     });
 
-    return { success: true, seat: serializeBigInt(result) };
+    return { success: true, count: serializeBigInt(result.count) };
   } catch (error: any) {
-    console.error("Error al marcar asiento pendiente:", error);
-    return { success: false, error: error.message || "El asiento ya ha sido seleccionado por otro pasajero." };
+    console.error("Error al marcar asientos pendientes:", error);
+    return { success: false, error: error.message || "Alguno de los asientos ya ha sido seleccionado por otro pasajero." };
   }
 }
 
-// 28. liberarAsiento
-export async function liberarAsiento(seatId: string) {
+// 28. liberarAsientos
+export async function liberarAsientos(seatIds: string[]) {
+  if (!seatIds || seatIds.length === 0) return { success: true, count: 0 };
+  
   try {
     const result = await prisma.asientoViaje.updateMany({
       where: {
-        id: BigInt(seatId),
+        id: { in: seatIds.map(id => BigInt(id)) },
         estado: "pendiente",
       },
       data: {
         estado: "disponible",
         bloqueado_por_usuario_id: null,
+        bloqueado_por_token: null,
         bloqueado_en: null,
-      },
+      } as any,
     });
 
     return { success: true, count: result.count };
   } catch (error: any) {
-    console.error("Error al liberar asiento:", error);
-    return { success: false, error: error.message || "Error al liberar asiento." };
+    console.error("Error al liberar asientos:", error);
+    return { success: false, error: error.message || "Error al liberar asientos." };
+  }
+}
+
+export async function enviarTicketEmail(emailDestino: string, tickets: any[], tripDetails: any) {
+  try {
+    if (!process.env.RESEND_API_KEY) {
+      console.log("No se ha configurado RESEND_API_KEY, no se enviará el correo.");
+      return { success: false, error: "Resend no configurado" };
+    }
+
+    const { origen, destino, fecha_salida, precio_base } = tripDetails;
+    const dateStr = new Date(fecha_salida).toLocaleDateString();
+    const timeStr = new Date(fecha_salida).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    let ticketsHtml = tickets.map(t => `
+      <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 16px; background-color: #f9fafb;">
+        <p style="margin: 0 0 8px 0; font-size: 16px; font-weight: bold; color: #111827;">Pasajero: ${t.nombres} ${t.apellidos}</p>
+        <p style="margin: 0 0 8px 0; color: #4b5563;">DNI: ${t.dni}</p>
+        <p style="margin: 0 0 8px 0; color: #4b5563;">Asiento ID: ${t.asiento_viaje_id}</p>
+        <div style="background-color: #fff; border: 1px dashed #f07639; padding: 12px; text-align: center; border-radius: 4px; margin-top: 12px;">
+          <p style="margin: 0; font-size: 12px; color: #6b7280; text-transform: uppercase;">Código de Abordaje</p>
+          <p style="margin: 4px 0 0 0; font-size: 20px; font-weight: bold; color: #f07639; font-family: monospace;">${t.codigo_qr}</p>
+        </div>
+      </div>
+    `).join("");
+
+    const html = `
+      <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto; color: #374151;">
+        <div style="text-align: center; padding: 24px 0;">
+          <h1 style="color: #f07639; margin: 0; font-size: 28px;">El Cumbe</h1>
+          <p style="color: #6b7280; margin-top: 8px;">Tu pasaje ha sido confirmado</p>
+        </div>
+        
+        <div style="background-color: #ffffff; border-radius: 12px; padding: 24px; border: 1px solid #e5e7eb; margin-bottom: 24px;">
+          <h2 style="font-size: 18px; color: #111827; margin-top: 0; border-bottom: 2px solid #f3f4f6; padding-bottom: 12px;">Detalles del Viaje</h2>
+          <table style="width: 100%; border-collapse: collapse; margin-top: 16px;">
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Origen:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${origen}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Destino:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${destino}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0; color: #6b7280;">Fecha y Hora:</td>
+              <td style="padding: 8px 0; font-weight: bold; text-align: right;">${dateStr} - ${timeStr}</td>
+            </tr>
+          </table>
+        </div>
+
+        <h2 style="font-size: 18px; color: #111827;">Tus Boletos</h2>
+        ${ticketsHtml}
+
+        <p style="text-align: center; color: #9ca3af; font-size: 14px; margin-top: 32px;">
+          Gracias por confiar en Transportes El Cumbe.<br>
+          Por favor, preséntate 30 minutos antes del embarque.
+        </p>
+      </div>
+    `;
+
+    const data = await resend.emails.send({
+      from: 'El Cumbe <onboarding@resend.dev>', // Resend uses onboarding@resend.dev for free testing
+      to: [emailDestino],
+      subject: '¡Tu pasaje está confirmado! - El Cumbe',
+      html: html,
+    });
+
+    console.log("Correo enviado:", data);
+    return { success: true, data };
+  } catch (error) {
+    console.error("Error al enviar correo:", error);
+    return { success: false, error: "Error interno al enviar correo" };
   }
 }
 

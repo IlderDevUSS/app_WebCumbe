@@ -59,6 +59,7 @@ model Bus {
   pisos                 Int       @default(1)
   asientos_piso_1       Int?
   asientos_restringidos String?   @db.Text
+  imagenes              String?   @db.Text
   created_at            DateTime? @default(now()) @db.Timestamp(0)
   updated_at            DateTime? @default(now()) @db.Timestamp(0)
   
@@ -111,6 +112,7 @@ model AsientoViaje {
   piso                     Int       @default(1)
   estado                   String    @default("disponible")
   bloqueado_por_usuario_id BigInt?   @db.UnsignedBigInt
+  bloqueado_por_token      String?   @db.VarChar(255)
   bloqueado_en             DateTime? @db.Timestamp(0)
   created_at               DateTime? @default(now()) @db.Timestamp(0)
   updated_at               DateTime? @default(now()) @db.Timestamp(0)

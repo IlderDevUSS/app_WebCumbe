@@ -104,8 +104,8 @@ export async function crearViajeConAsientos(data: {
         if (bus.asientos_piso_1) {
           asientosPiso1 = bus.asientos_piso_1;
         } else {
-          // Fallback por si acaso
-          asientosPiso1 = Math.floor(totalAsientos * 0.3);
+          // El diseño UI del frontend exige exactamente 12 asientos en el primer piso para Buscama
+          asientosPiso1 = 12;
         }
         asientosPiso2 = totalAsientos - asientosPiso1;
       }

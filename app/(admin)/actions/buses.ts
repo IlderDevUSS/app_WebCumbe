@@ -37,6 +37,7 @@ export async function crearBus(data: {
   pisos: number;
   asientos_piso_1?: number;
   asientos_restringidos?: string;
+  imagenes?: string;
 }) {
   try {
     const nuevoBus = await prisma.bus.create({
@@ -47,6 +48,7 @@ export async function crearBus(data: {
         pisos: data.pisos,
         asientos_piso_1: data.asientos_piso_1,
         asientos_restringidos: data.asientos_restringidos,
+        imagenes: data.imagenes,
       },
     });
 
@@ -67,11 +69,14 @@ export async function actualizarBus(
     pisos: number;
     asientos_piso_1?: number;
     asientos_restringidos?: string;
+    imagenes?: string;
   }
 ) {
   try {
+    const busId = parseId(id);
+
     const busActualizado = await prisma.bus.update({
-      where: { id: parseId(id) },
+      where: { id: busId },
       data: {
         placa: data.placa,
         marca: data.marca,
@@ -79,6 +84,7 @@ export async function actualizarBus(
         pisos: data.pisos,
         asientos_piso_1: data.asientos_piso_1,
         asientos_restringidos: data.asientos_restringidos,
+        imagenes: data.imagenes,
       },
     });
 

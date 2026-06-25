@@ -12,6 +12,7 @@ type Bus = {
   pisos: number;
   asientos_piso_1?: number | null;
   asientos_restringidos?: string | null;
+  imagenes?: string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -28,6 +29,7 @@ export default function BusClient({ initialData }: { initialData: Bus[] }) {
     capacidad: 40,
     pisos: 1,
     asientos_piso_1: 40,
+    imagenes: "",
   });
 
   // Estados Modal Configuración Asientos
@@ -49,10 +51,11 @@ export default function BusClient({ initialData }: { initialData: Bus[] }) {
         capacidad: bus.capacidad,
         pisos: bus.pisos,
         asientos_piso_1: bus.asientos_piso_1 || bus.capacidad,
+        imagenes: bus.imagenes || "",
       });
     } else {
       setEditingId(null);
-      setFormData({ placa: "", marca: "", capacidad: 40, pisos: 1, asientos_piso_1: 40 });
+      setFormData({ placa: "", marca: "", capacidad: 40, pisos: 1, asientos_piso_1: 40, imagenes: "" });
     }
     setIsModalOpen(true);
   };
@@ -388,6 +391,22 @@ export default function BusClient({ initialData }: { initialData: Bus[] }) {
                     </p>
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Imágenes del Bus (Rutas o URLs)
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={formData.imagenes || ""}
+                    onChange={(e) => setFormData({ ...formData, imagenes: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#f07639] focus:border-transparent outline-none transition-all"
+                    placeholder="Ej. /images/buses/bus1.jpg, /images/buses/bus2.jpg"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Separa múltiples rutas con comas.
+                  </p>
+                </div>
               </div>
 
               <div className="mt-8 flex justify-end space-x-3">

@@ -4,7 +4,9 @@ import { useState, useEffect, Suspense } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getClienteProfile, updateClienteProfile } from "@/app/actions";
-import { User, Calendar, Phone, CreditCard, Mail, Ticket, CheckCircle, Save, Loader2, Bus } from "lucide-react";
+import { User, Calendar, Phone, CreditCard, Mail, Ticket, CheckCircle, Save, Loader2, Bus, Download } from "lucide-react";
+import { jsPDF } from "jspdf";
+import QRCode from "qrcode";
 import Link from "next/link";
 
 function PerfilContent() {
@@ -68,6 +70,90 @@ function PerfilContent() {
       setLoading(false);
     }
   }
+
+  const handleDownloadPDF = async (ticket: any) => {
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, 210, 30, "F");
+    
+    // Cargar Logo
+    const logoImg = new window.Image();
+    logoImg.src = '/logocumbe.png';
+    await new Promise((resolve) => {
+      logoImg.onload = () => {
+        // x=20, y=5, width=60, height=20 (Ajustar según aspect ratio)
+        doc.addImage(logoImg, 'PNG', 20, 5, 55, 18);
+        resolve(true);
+      };
+      logoImg.onerror = () => resolve(false); // Ignorar si falla
+    });
+    
+    doc.setTextColor(240, 118, 57);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("BOLETO DE VIAJE", 190, 20, { align: "right" });
+    
+    // Línea separadora naranja
+    doc.setDrawColor(240, 118, 57);
+    doc.setLineWidth(1);
+    doc.line(20, 30, 190, 30);
+    
+    // Content
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(14);
+    doc.text("Información del Pasajero", 20, 45);
+    doc.setLineWidth(0.5);
+    doc.line(20, 48, 190, 48);
+    
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Pasajero: ${ticket.nombres} ${ticket.apellidos}`, 20, 60);
+    doc.text(`DNI: ${ticket.dni}`, 20, 70);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("Detalles del Viaje", 20, 95);
+    doc.line(20, 98, 190, 98);
+    
+    const salida = ticket.asiento_viaje?.viaje?.fecha_salida 
+      ? new Date(ticket.asiento_viaje.viaje.fecha_salida) 
+      : null;
+      
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Origen: ${ticket.asiento_viaje?.viaje?.ruta?.origen?.nombre || ""}`, 20, 110);
+    doc.text(`Destino: ${ticket.asiento_viaje?.viaje?.ruta?.destino?.nombre || ""}`, 20, 120);
+    
+    const dateStr = salida ? salida.toLocaleDateString() : "";
+    const timeStr = salida ? salida.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+    doc.text(`Fecha y Hora: ${dateStr} - ${timeStr}`, 20, 130);
+    
+    const tipoBus = ticket.asiento_viaje?.viaje?.bus?.pisos === 2 ? "Buscama" : "Normal";
+    doc.text(`Servicio: Bus ${tipoBus} (Placa: ${ticket.asiento_viaje?.viaje?.bus?.placa || "-"})`, 20, 150);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Asiento N°: ${ticket.asiento_viaje?.numero_asiento || "-"} (Piso ${ticket.asiento_viaje?.piso || "-"})`, 20, 160);
+    
+    try {
+      // Generar imagen QR
+      const qrDataUrl = await QRCode.toDataURL(ticket.codigo_qr, { width: 150, margin: 1 });
+      doc.addImage(qrDataUrl, "PNG", 80, 175, 50, 50); // Centrado (210/2 - 25 = 80), y=175
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(ticket.codigo_qr, 105, 230, { align: "center" });
+    } catch (err) {
+      console.error("Error generando QR", err);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(240, 118, 57);
+      doc.text(`CÓDIGO DE ABORDAJE: ${ticket.codigo_qr}`, 105, 190, { align: "center" });
+    }
+    
+    doc.save(`Boleto_ElCumbe_${ticket.dni}.pdf`);
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -361,11 +447,13 @@ function PerfilContent() {
                       className="border border-gray-200 rounded-2xl p-6 hover:border-[#f07639] transition-all bg-white relative overflow-hidden group flex flex-col md:flex-row justify-between items-center gap-6"
                     >
                       <div className="flex-1 space-y-4 w-full">
-                        <div className="flex items-center gap-2">
-                          <Bus className="h-5 w-5 text-[#f07639]" />
-                          <span className="text-sm font-bold text-gray-900 uppercase">
-                            Servicio de Bus - N° {ticket.asiento_viaje?.viaje?.bus?.placa}
-                          </span>
+                        <div className="flex items-center gap-3">
+                          <Bus className="h-6 w-6 text-[#f07639]" />
+                          <div>
+                            <span className="text-sm font-bold text-gray-900 uppercase block">
+                              Bus {ticket.asiento_viaje?.viaje?.bus?.pisos === 2 ? "Buscama" : "Normal"} - N° {ticket.asiento_viaje?.viaje?.bus?.placa}
+                            </span>
+                          </div>
                         </div>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -406,6 +494,14 @@ function PerfilContent() {
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                           Ticket Válido
                         </span>
+                        
+                        <button
+                          onClick={() => handleDownloadPDF(ticket)}
+                          className="mt-3 flex items-center justify-center w-full px-3 py-2 text-xs font-bold text-white bg-[#f07639] hover:bg-orange-600 rounded-lg transition-colors shadow-sm"
+                        >
+                          <Download className="w-3.5 h-3.5 mr-1" />
+                          Descargar PDF
+                        </button>
                       </div>
                     </div>
                   );

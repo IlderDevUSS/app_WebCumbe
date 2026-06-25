@@ -7,11 +7,13 @@ import {
   getLocations, 
   searchTrips, 
   getTripSeats, 
-  marcarAsientoPendiente, 
-  liberarAsiento, 
+  marcarAsientosPendientes, 
+  liberarAsientos, 
+  crearOrdenCulqi,
   crearCargoCulqi, 
-  procesarPagoExitosoCulqi,
-  getClienteProfile
+  procesarPagoMultiplesAsientosCulqi,
+  getClienteProfile,
+  enviarTicketEmail
 } from "@/app/actions";
 import { 
   Loader2, 
@@ -25,6 +27,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
+import { jsPDF } from "jspdf";
+import QRCode from "qrcode";
 
 function CompraContent() {
   const { data: session, status } = useSession();
@@ -38,6 +42,11 @@ function CompraContent() {
   
   // Global loading state for actions
   const [loading, setLoading] = useState(false);
+
+  // Bus Images Modal state
+  const [busImages, setBusImages] = useState<string[]>([]);
+  const [isImagesModalOpen, setIsImagesModalOpen] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   // Step 1: Búsqueda
   const [locations, setLocations] = useState<any[]>([]);
@@ -75,39 +84,52 @@ function CompraContent() {
 
   // Step 3: Asientos
   const [seats, setSeats] = useState<any[]>([]);
-  const [selectedSeat, setSelectedSeat] = useState<any | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<any[]>([]);
 
   // Step 4: Checkout
   const [paymentSuccess, setPaymentSuccess] = useState(false);
-  const [ticketResult, setTicketResult] = useState<any | null>(null);
-  const [pasajero, setPasajero] = useState({ nombres: "", apellidos: "", dni: "", telefono: "" });
+  const [ticketResult, setTicketResult] = useState<any[] | null>(null);
+  const [pasajeros, setPasajeros] = useState<Record<string, any>>({});
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(480); // 8 minutos en segundos
+  const [userProfile, setUserProfile] = useState<any>(null);
 
-  // Mantener referencia del asiento seleccionado para liberarlo al desmontar
-  const selectedSeatRef = useRef<any>(null);
+  // Mantener referencia de los asientos seleccionados para liberarlos al desmontar
+  const selectedSeatsRef = useRef(selectedSeats);
+  const stepRef = useRef(step);
+  
   useEffect(() => {
-    selectedSeatRef.current = selectedSeat;
-  }, [selectedSeat]);
+    selectedSeatsRef.current = selectedSeats;
+    stepRef.current = step;
+  }, [selectedSeats, step]);
 
-  // Liberar el asiento bloqueado si el usuario abandona la página (desmonta el componente)
+  // Liberar los asientos bloqueados si el usuario abandona la página (desmonta el componente)
   useEffect(() => {
-    return () => {
-      if (selectedSeatRef.current) {
-        liberarAsiento(selectedSeatRef.current.id).catch((err) => {
-          console.error("Error al liberar asiento al abandonar la página:", err);
-        });
+    const releaseMySeats = () => {
+      const seats = selectedSeatsRef.current;
+      const currentStep = stepRef.current;
+      if (seats.length > 0 && currentStep >= 3 && currentStep !== 5) {
+        const ids = seats.map(s => s.id);
+        const data = JSON.stringify({ seatIds: ids });
+        navigator.sendBeacon('/api/release-seats', new Blob([data], { type: 'application/json' }));
       }
+    };
+
+    window.addEventListener('beforeunload', releaseMySeats);
+    
+    return () => {
+      releaseMySeats();
     };
   }, []);
 
   // Función para manejar la expiración del temporizador
   const handleExpiration = async () => {
-    if (selectedSeatRef.current) {
+    if (selectedSeatsRef.current.length > 0) {
       setLoading(true);
-      await liberarAsiento(selectedSeatRef.current.id);
-      alert("Tu tiempo de reserva para completar el pago ha expirado. Por favor, selecciona un asiento nuevamente.");
-      setSelectedSeat(null);
+      const ids = selectedSeatsRef.current.map(s => s.id);
+      await liberarAsientos(ids);
+      alert("Tu tiempo de reserva para completar el pago ha expirado. Por favor, selecciona nuevamente.");
+      setSelectedSeats([]);
       if (selectedTrip) {
         const tripSeats = await getTripSeats(selectedTrip.id);
         setSeats(tripSeats);
@@ -135,29 +157,100 @@ function CompraContent() {
     return () => clearInterval(timer);
   }, [step, paymentSuccess, selectedTrip]);
 
+  const handleDownloadPDF = async (ticket: any) => {
+    const doc = new jsPDF();
+    const seat = selectedSeats.find(s => String(s.id) === String(ticket.asiento_viaje_id));
+    
+    // Header
+    doc.setFillColor(255, 255, 255);
+    doc.rect(0, 0, 210, 30, "F");
+    
+    // Cargar Logo
+    const logoImg = new window.Image();
+    logoImg.src = '/logocumbe.png';
+    await new Promise((resolve) => {
+      logoImg.onload = () => {
+        // x=20, y=5, width=60, height=20 (Ajustar según aspect ratio)
+        doc.addImage(logoImg, 'PNG', 20, 5, 55, 18);
+        resolve(true);
+      };
+      logoImg.onerror = () => resolve(false); // Ignorar si falla
+    });
+    
+    doc.setTextColor(240, 118, 57);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("BOLETO DE VIAJE", 190, 20, { align: "right" });
+    
+    // Línea separadora naranja
+    doc.setDrawColor(240, 118, 57);
+    doc.setLineWidth(1);
+    doc.line(20, 30, 190, 30);
+    
+    // Content
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(14);
+    doc.text("Información del Pasajero", 20, 45);
+    doc.setLineWidth(0.5);
+    doc.line(20, 48, 190, 48);
+    
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Pasajero: ${ticket.nombres} ${ticket.apellidos}`, 20, 60);
+    doc.text(`DNI: ${ticket.dni}`, 20, 70);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("Detalles del Viaje", 20, 95);
+    doc.line(20, 98, 190, 98);
+    
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Origen: ${selectedTrip?.ruta?.origen?.nombre || ""}`, 20, 110);
+    doc.text(`Destino: ${selectedTrip?.ruta?.destino?.nombre || ""}`, 20, 120);
+    const dateStr = selectedTrip ? new Date(selectedTrip.fecha_salida || selectedTrip.departure_time).toLocaleDateString() : "";
+    const timeStr = selectedTrip ? new Date(selectedTrip.fecha_salida || selectedTrip.departure_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
+    doc.text(`Fecha y Hora: ${dateStr} - ${timeStr}`, 20, 130);
+    
+    const tipoBus = selectedTrip?.bus?.pisos === 2 ? "Buscama" : "Normal";
+    doc.text(`Servicio: Bus ${tipoBus} (Placa: ${selectedTrip?.bus?.placa || "-"})`, 20, 150);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Asiento N°: ${seat?.numero_asiento || "-"} (Piso ${seat?.piso || "-"})`, 20, 160);
+    
+    try {
+      // Generar imagen QR
+      const qrDataUrl = await QRCode.toDataURL(ticket.codigo_qr, { width: 150, margin: 1 });
+      doc.addImage(qrDataUrl, "PNG", 80, 175, 50, 50); // Centrado (210/2 - 25 = 80), y=175
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 100, 100);
+      doc.text(ticket.codigo_qr, 105, 230, { align: "center" });
+    } catch (err) {
+      console.error("Error generando QR", err);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(240, 118, 57);
+      doc.text(`CÓDIGO DE ABORDAJE: ${ticket.codigo_qr}`, 105, 190, { align: "center" });
+    }
+    
+    doc.save(`Boleto_${ticket.dni}.pdf`);
+  };
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Cargar datos completos del perfil del cliente autenticado para el llenado automático
+  // Cargar datos completos del perfil del cliente autenticado
   useEffect(() => {
     async function fetchPerfilCliente() {
       if (status === "authenticated" && session?.user?.email) {
         try {
           const perfil = await getClienteProfile(session.user.email);
           if (perfil) {
-            const partes = perfil.nombre.split(" ");
-            const nombresStr = partes.slice(0, Math.ceil(partes.length / 2)).join(" ");
-            const apellidosStr = partes.slice(Math.ceil(partes.length / 2)).join(" ");
-            
-            setPasajero({
-              nombres: nombresStr || "",
-              apellidos: apellidosStr || "",
-              dni: perfil.dni || "",
-              telefono: perfil.telefono || "",
-            });
+            setUserProfile(perfil);
           }
         } catch (e) {
           console.error("Error al cargar perfil de cliente para autocompletado:", e);
@@ -178,10 +271,10 @@ function CompraContent() {
         setDestinationId(destinationParam);
         setDate(dateParam);
         
+        setStep(2);
         setLoading(true);
         const results = await searchTrips(originParam, destinationParam, dateParam);
         setTrips(results);
-        setStep(2);
         setLoading(false);
       }
     }
@@ -193,13 +286,14 @@ function CompraContent() {
     const handleCulqiMessage = async (event: MessageEvent) => {
       if (event.data === "checkout_cerrado") {
         console.log("Checkout cerrado por el usuario.");
-        if (selectedSeat) {
+        if (selectedSeats.length > 0) {
           setLoading(true);
-          await liberarAsiento(selectedSeat.id);
+          const ids = selectedSeats.map(s => s.id);
+          await liberarAsientos(ids);
           alert("Pago fallido");
           setPaymentError("El proceso de pago fue cancelado o cerrado.");
           setStep(3);
-          setSelectedSeat(null);
+          setSelectedSeats([]);
           // Recargar asientos
           if (selectedTrip) {
             const tripSeats = await getTripSeats(selectedTrip.id);
@@ -214,7 +308,7 @@ function CompraContent() {
     return () => {
       window.removeEventListener("message", handleCulqiMessage);
     };
-  }, [selectedSeat, selectedTrip]);
+  }, [selectedSeats, selectedTrip]);
 
   const handleSearchTrips = async () => {
     if (!originId || !destinationId || !date) {
@@ -242,135 +336,209 @@ function CompraContent() {
     setLoading(false);
   };
 
+  const getGuestToken = () => {
+    if (typeof window !== "undefined") {
+      let token = localStorage.getItem("guestToken");
+      if (!token) {
+        token = "gt_" + Math.random().toString(36).substring(2, 15) + Date.now();
+        localStorage.setItem("guestToken", token);
+      }
+      return token;
+    }
+    return "gt_fallback";
+  };
+
   const goToStep4 = async () => {
-    if (!selectedSeat) return;
+    if (selectedSeats.length === 0) return;
     setLoading(true);
     setPaymentError(null);
     try {
-      const reserveRes = await marcarAsientoPendiente(selectedSeat.id, session?.user?.email || undefined);
+      const ids = selectedSeats.map(s => s.id);
+      const token = getGuestToken();
+      const reserveRes = await marcarAsientosPendientes(ids, token, session?.user?.email || undefined);
       if (!reserveRes.success) {
-        alert(reserveRes.error || "El asiento ya ha sido seleccionado por otro pasajero.");
+        alert(reserveRes.error || "Alguno de los asientos seleccionados ya ha sido tomado.");
         // Volver a cargar asientos
         if (selectedTrip) {
           const tripSeats = await getTripSeats(selectedTrip.id);
           setSeats(tripSeats);
         }
-        setSelectedSeat(null);
+        setSelectedSeats([]);
         setStep(3);
         setLoading(false);
         return;
       }
 
-      // Reiniciar temporizador
-      setTimeLeft(480);
+      // Reiniciar temporizador dinámico (3 mins base + 1 min por asiento)
+      const dynamicSeconds = 180 + (selectedSeats.length * 60);
+      setTimeLeft(dynamicSeconds);
 
-      // Si hay sesión activa, pre-completamos los nombres si están vacíos
-      if (session?.user?.name && !pasajero.nombres) {
-        const partes = session.user.name.split(" ");
-        const nombresStr = partes.slice(0, Math.ceil(partes.length / 2)).join(" ");
-        const apellidosStr = partes.slice(Math.ceil(partes.length / 2)).join(" ");
-        setPasajero(p => ({ ...p, nombres: nombresStr, apellidos: apellidosStr }));
-      }
+      // Si hay sesión activa, pre-completamos los nombres del primer asiento
+      const initialPasajeros: Record<string, any> = {};
+      selectedSeats.forEach((seat, index) => {
+        if (index === 0 && (userProfile || session?.user?.name)) {
+           let nombres = "";
+           let apellidos = "";
+           if (userProfile?.nombre) {
+             const partes = userProfile.nombre.split(" ");
+             nombres = partes.slice(0, Math.ceil(partes.length / 2)).join(" ");
+             apellidos = partes.slice(Math.ceil(partes.length / 2)).join(" ");
+           } else if (session?.user?.name) {
+             const partes = session.user.name.split(" ");
+             nombres = partes.slice(0, Math.ceil(partes.length / 2)).join(" ");
+             apellidos = partes.slice(Math.ceil(partes.length / 2)).join(" ");
+           }
+           initialPasajeros[seat.id] = {
+             nombres,
+             apellidos,
+             dni: userProfile?.dni || "",
+             telefono: userProfile?.telefono || ""
+           };
+        } else {
+           initialPasajeros[seat.id] = { nombres: "", apellidos: "", dni: "", telefono: "" };
+        }
+      });
+      setPasajeros(initialPasajeros);
+
       setStep(4);
     } catch (e) {
-      console.error("Error al marcar asiento temporal en goToStep4:", e);
-      alert("Hubo un error al reservar el asiento temporalmente.");
+      console.error("Error al marcar asientos temporales en goToStep4:", e);
+      alert("Hubo un error al reservar los asientos temporalmente.");
     } finally {
       setLoading(false);
     }
   };
 
   const handlePagarConCulqi = async () => {
-    if (!pasajero.nombres || !pasajero.apellidos || !pasajero.dni) {
-      alert("Nombres, Apellidos y DNI son obligatorios.");
-      return;
-    }
-    if (!/^\d{8}$/.test(pasajero.dni)) {
-      alert("El DNI debe tener exactamente 8 dígitos.");
-      return;
+    // Validar todos los pasajeros
+    const nameRegex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/;
+
+    for (const seat of selectedSeats) {
+      const p = pasajeros[seat.id];
+      if (!p.nombres || !p.apellidos || !p.dni) {
+        alert(`Faltan datos obligatorios para el pasajero (Asiento ${seat.numero_asiento}).`);
+        return;
+      }
+      if (!nameRegex.test(p.nombres) || p.nombres.length > 50) {
+        alert(`El nombre para el Asiento ${seat.numero_asiento} debe contener solo letras y un máximo de 50 caracteres.`);
+        return;
+      }
+      if (!nameRegex.test(p.apellidos) || p.apellidos.length > 50) {
+        alert(`Los apellidos para el Asiento ${seat.numero_asiento} deben contener solo letras y un máximo de 50 caracteres.`);
+        return;
+      }
+      if (!/^\d{8}$/.test(p.dni)) {
+        alert(`El DNI para el Asiento ${seat.numero_asiento} debe tener exactamente 8 números.`);
+        return;
+      }
+      if (p.telefono && !/^\d{9}$/.test(p.telefono)) {
+        alert(`El celular para el Asiento ${seat.numero_asiento} debe tener exactamente 9 números.`);
+        return;
+      }
     }
 
     setLoading(true);
     setPaymentError(null);
 
     try {
-      const email = session?.user?.email || `invitado_${pasajero.dni}@elcumbe.com`;
+      const primerPasajero = pasajeros[selectedSeats[0].id];
+      const email = session?.user?.email || `invitado_${primerPasajero.dni}@elcumbe.com`;
 
       // 1. Configurar el objeto Culqi global
       const Culqi = (window as any).Culqi;
-      if (!Culqi) {
-        await liberarAsiento(selectedSeat.id);
-        alert("No se pudo cargar la pasarela de pago Culqi. Por favor intenta de nuevo.");
+      const totalAmount = selectedSeats.length * Number(selectedTrip.ruta.precio_base);
+
+      // 1.5 Crear Orden en el backend para poder usar Yape/PagoEfectivo
+      const orderRes = await crearOrdenCulqi(
+        totalAmount, 
+        email, 
+        primerPasajero.nombres, 
+        primerPasajero.apellidos, 
+        primerPasajero.telefono || ""
+      );
+
+      if (!orderRes.success || !orderRes.orderId) {
+        setPaymentError(orderRes.error || "No se pudo generar la orden de pago.");
         setLoading(false);
         return;
       }
 
-      // Configurar Llave Pública de Culqi
-      Culqi.publicKey = process.env.NEXT_PUBLIC_CULQI_PUBLIC_KEY || "pk_test_d7a5b3a32f6236b2";
+      const culqiPublicKey = process.env.NEXT_PUBLIC_CULQI_PUBLIC_KEY;
+      if (!culqiPublicKey) {
+        setPaymentError("Falta la clave pública de Culqi en el sistema.");
+        setLoading(false);
+        return;
+      }
 
+      Culqi.publicKey = culqiPublicKey;
       Culqi.settings({
-        title: "Transportes El Cumbe",
-        currency: "PEN",
-        amount: Math.round(Number(selectedTrip.ruta.precio_base) * 100), // En centavos
+        title: 'El Cumbe',
+        currency: 'PEN',
+        amount: Math.round(totalAmount * 100), // En centavos
+        order: orderRes.orderId, // ESTO ES OBLIGATORIO PARA YAPE
       });
 
       Culqi.options({
-        style: {
-          logo: "https://i.ibb.co/C0hYj1f/logo-cumbe.png",
-          bannerColor: "#f07639",
-        }
+        lang: "es",
+        installments: false,
+        paymentMethods: {
+          tarjeta: true,
+          yape: true,
+          bancaMovil: true,
+          agente: true,
+          cuotealo: false,
+        },
       });
 
-      // 3. Definir la función callback que recibirá el token de pago
+      // 2. Abrir modal
+      Culqi.open();
+
+      // 3. Manejar el evento cuando Culqi devuelve un token válido
       (window as any).culqi = async () => {
         if (Culqi.token) {
           const token = Culqi.token.id;
-          console.log("Token generado exitosamente:", token);
-          setLoading(true);
-
+          
           try {
-            // Enviar token al backend para realizar el cargo
-            const chargeRes = await crearCargoCulqi(
-              token,
-              email,
-              Number(selectedTrip.ruta.precio_base)
+            // a. Crear el cargo en nuestro backend
+            const chargeRes = await crearCargoCulqi(token, email, totalAmount);
+            
+            if (!chargeRes.success) {
+               setPaymentError(chargeRes.error || "Error al procesar el pago");
+               setLoading(false);
+               Culqi.close();
+               return;
+            }
+
+            // b. Pago exitoso, procesar en la DB
+            const asientosPasajeros = selectedSeats.map(s => ({
+              seatId: s.id,
+              pasajeroData: pasajeros[s.id]
+            }));
+
+            const res = await procesarPagoMultiplesAsientosCulqi(
+              selectedTrip.id,
+              asientosPasajeros,
+              totalAmount,
+              chargeRes.chargeId,
+              session?.user?.email || undefined
             );
 
-            if (chargeRes.success && chargeRes.chargeId) {
-              // Registro de pago y creación del pasaje en BD
-              const dbRes = await procesarPagoExitosoCulqi(
-                selectedTrip.id,
-                selectedSeat.id,
-                pasajero,
-                Number(selectedTrip.ruta.precio_base),
-                chargeRes.chargeId,
-                session?.user?.email || undefined
-              );
-
-              if (dbRes.success && dbRes.ticket) {
-                setTicketResult(dbRes.ticket);
-                setPaymentSuccess(true);
-                setStep(4);
-                Culqi.close();
-              } else {
-                alert(dbRes.error || "El pago fue procesado, pero hubo un problema emitiendo tu boleto. Por favor contacta a soporte.");
-                Culqi.close();
-              }
+            if (res.success) {
+              setPaymentSuccess(true);
+              setTicketResult(res.tickets);
+              
+              // Enviar correo de forma asíncrona (sin bloquear UI)
+              enviarTicketEmail(email, res.tickets, selectedTrip).catch(console.error);
+              
+              Culqi.close();
             } else {
-              // Error al procesar el cargo
-              await liberarAsiento(selectedSeat.id);
-              alert(chargeRes.error || "El pago no pudo ser completado.");
-              setPaymentError(chargeRes.error || "Pago fallido en pasarela.");
-              setStep(3);
-              setSelectedSeat(null);
-              // Recargar asientos
-              const tripSeats = await getTripSeats(selectedTrip.id);
-              setSeats(tripSeats);
+              setPaymentError(res.error || "Error al emitir boletos en la base de datos.");
               Culqi.close();
             }
-          } catch (e: any) {
+          } catch (e) {
             console.error("Error procesando pago en callback:", e);
-            await liberarAsiento(selectedSeat.id);
+            const ids = selectedSeats.map(s => s.id);
+            await liberarAsientos(ids);
             alert("Ocurrió un error inesperado al procesar el pago.");
             Culqi.close();
           } finally {
@@ -381,21 +549,19 @@ function CompraContent() {
           Culqi.close();
         } else {
           console.error("Error de tokenización:", Culqi.error);
-          await liberarAsiento(selectedSeat.id);
+          const ids = selectedSeats.map(s => s.id);
+          await liberarAsientos(ids);
           alert("Pago fallido");
           setPaymentError(Culqi.error?.user_message || "Pago fallido");
           setStep(3);
-          setSelectedSeat(null);
+          setSelectedSeats([]);
           // Recargar asientos
           const tripSeats = await getTripSeats(selectedTrip.id);
           setSeats(tripSeats);
           setLoading(false);
+          Culqi.close();
         }
       };
-
-      // 4. Abrir pasarela Culqi
-      Culqi.open();
-
     } catch (e) {
       console.error("Error al iniciar checkout:", e);
       alert("Error al iniciar el checkout.");
@@ -436,26 +602,35 @@ function CompraContent() {
   );
 
   const renderAsientoButton = (seat: any, esPiso1: boolean) => {
-    const isAvailable = seat.estado === "disponible";
-    const isSelected = selectedSeat?.id === seat.id;
+    if (!seat) return <div className="w-8 h-8" />;
 
-    let colorClass = "";
-    let isOcupado = false;
+    const isSelected = selectedSeats.some(s => s.id === seat.id);
+    const isOcupadoStatus = seat.estado !== "disponible" && !isSelected;
 
-    if (isSelected) {
+    const toggleSeat = () => {
+      if (isSelected) {
+        setSelectedSeats(prev => prev.filter(s => s.id !== seat.id));
+      } else {
+        if (selectedSeats.length >= 6) {
+          alert("Puedes seleccionar un máximo de 6 asientos a la vez.");
+          return;
+        }
+        setSelectedSeats(prev => [...prev, seat]);
+      }
+    };
+
+    let colorClass = "text-[#7c2d12] hover:text-orange-600 bg-transparent hover:scale-105";
+    if (isOcupadoStatus) {
+      colorClass = "text-gray-300 bg-transparent cursor-not-allowed";
+    } else if (isSelected) {
       colorClass = "text-white bg-[#f07639] border-[#d8662d] shadow-md scale-105 rounded-xl";
-    } else if (!isAvailable) {
-      colorClass = "text-gray-300 bg-transparent";
-      isOcupado = true;
-    } else {
-      colorClass = "text-[#7c2d12] hover:text-orange-600 bg-transparent hover:scale-105";
     }
 
     return (
       <button
         key={seat.id}
-        disabled={!isAvailable}
-        onClick={() => setSelectedSeat(seat)}
+        disabled={isOcupadoStatus || loading}
+        onClick={toggleSeat}
         className={`relative w-8 h-8 flex items-center justify-center transition-all focus:outline-none cursor-pointer ${colorClass}`}
       >
         <svg
@@ -481,7 +656,7 @@ function CompraContent() {
             strokeLinejoin="round"
           />
 
-          {isOcupado ? (
+          {isOcupadoStatus ? (
             /* Cruz X para ocupados */
             <path
               d="M 40 22 L 60 42 M 60 22 L 40 42"
@@ -744,7 +919,12 @@ function CompraContent() {
                 <button onClick={() => setStep(1)} className="text-sm text-[#f07639] hover:underline font-medium">Modificar Búsqueda</button>
               </div>
 
-              {trips.length === 0 ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Loader2 className="w-12 h-12 text-[#f07639] animate-spin mb-4" />
+                  <p className="text-gray-500 font-medium text-lg">Buscando los mejores viajes para ti...</p>
+                </div>
+              ) : trips.length === 0 ? (
                 <div className="text-center py-12 bg-gray-50 rounded-2xl border border-dashed border-gray-300">
                   <Clock className="mx-auto h-12 w-12 text-gray-400" />
                   <h3 className="mt-2 text-sm font-medium text-gray-900">No hay viajes programados</h3>
@@ -760,6 +940,10 @@ function CompraContent() {
                             {trip.departure_time_formatted}
                           </p>
                           <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mt-1">Salida</p>
+                          <div className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 text-orange-800 uppercase tracking-wide">
+                            <BusFront className="w-3 h-3 mr-1" />
+                            {trip.bus?.pisos === 2 ? "Buscama" : "Normal"}
+                          </div>
                         </div>
                         <div className="h-12 w-px bg-gray-200 hidden sm:block"></div>
                         <div>
@@ -769,9 +953,27 @@ function CompraContent() {
                           </p>
                         </div>
                       </div>
-                      <button className="w-full sm:w-auto px-6 py-3 bg-gray-100 text-gray-900 font-bold rounded-xl group-hover:bg-[#f07639] group-hover:text-white transition-colors">
-                        Seleccionar
-                      </button>
+                      <div className="flex flex-col sm:flex-row gap-3 mt-4 sm:mt-0 w-full sm:w-auto">
+                        {trip.bus?.imagenes && trip.bus.imagenes.trim() !== "" && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const imgs = trip.bus.imagenes.split(",").map((i: string) => i.trim()).filter((i: string) => i !== "");
+                              if (imgs.length > 0) {
+                                setBusImages(imgs);
+                                setCurrentImageIndex(0);
+                                setIsImagesModalOpen(true);
+                              }
+                            }}
+                            className="w-full sm:w-auto px-6 py-3 bg-white border border-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-50 transition-colors"
+                          >
+                            Ver Bus
+                          </button>
+                        )}
+                        <button className="w-full sm:w-auto px-6 py-3 bg-gray-100 text-gray-900 font-bold rounded-xl hover:bg-[#f07639] hover:text-white transition-colors">
+                          Seleccionar
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -810,13 +1012,20 @@ function CompraContent() {
                   <span className="text-red-600 text-xs font-medium">{paymentError}</span>
                 )}
 
-                <button
-                  disabled={!selectedSeat || loading}
-                  onClick={goToStep4}
-                  className="flex items-center px-5 py-2 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-[#f07639] hover:bg-[#d8662d] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
-                >
-                  Continuar al Pago <ArrowRight className="ml-1.5 w-3.5 h-3.5" />
-                </button>
+                <div className="flex items-center gap-4 ml-auto">
+                  {selectedSeats.length > 0 && (
+                    <span className="text-sm font-bold text-gray-900 bg-orange-100 px-3 py-1.5 rounded-lg border border-orange-200">
+                      {selectedSeats.length} Asiento{selectedSeats.length > 1 ? 's' : ''} (S/ {selectedSeats.length * (selectedTrip?.ruta.precio_base || 0)})
+                    </span>
+                  )}
+                  <button
+                    disabled={selectedSeats.length === 0 || loading}
+                    onClick={goToStep4}
+                    className="flex items-center px-5 py-2 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-[#f07639] hover:bg-[#d8662d] focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+                  >
+                    Continuar al Pago <ArrowRight className="ml-1.5 w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
               {/* Croquis de Asientos */}
@@ -859,10 +1068,11 @@ function CompraContent() {
                 <h2 className="text-2xl font-extrabold text-gray-900">Resumen de Compra</h2>
                 <button 
                   onClick={async () => {
-                    if (selectedSeat) {
+                    if (selectedSeats.length > 0) {
                       setLoading(true);
-                      await liberarAsiento(selectedSeat.id);
-                      setSelectedSeat(null);
+                      const ids = selectedSeats.map(s => s.id);
+                      await liberarAsientos(ids);
+                      setSelectedSeats([]);
                       setLoading(false);
                     }
                     setStep(3);
@@ -879,52 +1089,66 @@ function CompraContent() {
                 
                 {/* Lado izquierdo (Datos y Botón de Pago) - 2/3 en pantallas medianas y grandes */}
                 <div className="md:col-span-2 space-y-6">
-                  {/* Formulario del Pasajero */}
-                  <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-                    <h3 className="text-lg font-bold text-gray-900 mb-4">Datos del Pasajero</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Nombres *</label>
-                        <input 
-                          type="text" 
-                          value={pasajero.nombres}
-                          onChange={(e) => setPasajero({...pasajero, nombres: e.target.value.toUpperCase()})}
-                          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
-                          disabled={loading}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Apellidos *</label>
-                        <input 
-                          type="text" 
-                          value={pasajero.apellidos}
-                          onChange={(e) => setPasajero({...pasajero, apellidos: e.target.value.toUpperCase()})}
-                          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
-                          disabled={loading}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">DNI *</label>
-                        <input 
-                          type="text" 
-                          maxLength={8}
-                          value={pasajero.dni}
-                          onChange={(e) => setPasajero({...pasajero, dni: e.target.value.replace(/\D/g, "")})}
-                          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
-                          disabled={loading}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Celular (Opcional)</label>
-                        <input 
-                          type="text" 
-                          value={pasajero.telefono}
-                          onChange={(e) => setPasajero({...pasajero, telefono: e.target.value.replace(/\D/g, "")})}
-                          className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
-                          disabled={loading}
-                        />
-                      </div>
-                    </div>
+                  {/* Formularios de los Pasajeros */}
+                  <div className="space-y-6">
+                    {selectedSeats.map((seat, index) => {
+                      const p = pasajeros[seat.id] || { nombres: "", apellidos: "", dni: "", telefono: "" };
+                      return (
+                        <div key={seat.id} className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                          <div className="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
+                            <h3 className="text-lg font-bold text-gray-900">
+                              Pasajero {index + 1}
+                            </h3>
+                            <span className="text-sm font-bold bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
+                              Asiento {seat.numero_asiento} (Piso {seat.piso})
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Nombres *</label>
+                              <input 
+                                type="text" 
+                                value={p.nombres}
+                                onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, nombres: e.target.value.toUpperCase()}})}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
+                                disabled={loading}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Apellidos *</label>
+                              <input 
+                                type="text" 
+                                value={p.apellidos}
+                                onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, apellidos: e.target.value.toUpperCase()}})}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
+                                disabled={loading}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">DNI *</label>
+                              <input 
+                                type="text" 
+                                maxLength={8}
+                                value={p.dni}
+                                onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, dni: e.target.value.replace(/\D/g, "")}})}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
+                                disabled={loading}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Celular (Opcional)</label>
+                              <input 
+                                type="text" 
+                                value={p.telefono}
+                                onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, telefono: e.target.value.replace(/\D/g, "")}})}
+                                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
+                                disabled={loading}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {paymentError && (
@@ -935,7 +1159,10 @@ function CompraContent() {
 
                   <button
                     onClick={handlePagarConCulqi}
-                    disabled={loading || !pasajero.nombres || !pasajero.apellidos || !pasajero.dni}
+                    disabled={loading || selectedSeats.some(seat => {
+                      const p = pasajeros[seat.id];
+                      return !p || !p.nombres || !p.apellidos || !p.dni;
+                    })}
                     className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gray-900 hover:bg-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 disabled:opacity-50 transition-all cursor-pointer"
                   >
                     {loading ? (
@@ -976,12 +1203,12 @@ function CompraContent() {
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-orange-800 font-medium opacity-75">Asiento</p>
-                        <p className="text-sm font-bold text-gray-900">N° {selectedSeat?.numero_asiento}</p>
+                        <p className="text-xs text-orange-800 font-medium opacity-75">Asientos ({selectedSeats.length})</p>
+                        <p className="text-sm font-bold text-gray-900">{selectedSeats.map(s => `N° ${s.numero_asiento}`).join(', ')}</p>
                       </div>
                       <div className="pt-2 border-t border-orange-200 flex justify-between items-center">
                         <p className="text-sm font-bold text-gray-900">Total a Pagar</p>
-                        <p className="text-2xl font-extrabold text-[#f07639]">S/ {selectedTrip?.ruta.precio_base}</p>
+                        <p className="text-2xl font-extrabold text-[#f07639]">S/ {selectedSeats.length * Number(selectedTrip?.ruta.precio_base)}</p>
                       </div>
                     </div>
                   </div>
@@ -998,13 +1225,37 @@ function CompraContent() {
                 <CheckCircle className="w-12 h-12 text-green-500" />
               </div>
               <h2 className="text-4xl font-extrabold text-gray-900 mb-4">¡Compra Exitosa!</h2>
-              <p className="text-lg text-gray-600 max-w-md mx-auto mb-8">
+              <p className="text-lg text-gray-600 max-w-md mx-auto mb-2">
                 Tu pasaje ha sido confirmado. Presenta este código al abordar el bus.
               </p>
+              <p className="text-sm font-medium text-green-600 max-w-md mx-auto mb-8 bg-green-50 py-2 px-4 rounded-full border border-green-200">
+                ✓ Se ha enviado una copia del boleto a tu correo.
+              </p>
               
-              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 max-w-sm mx-auto mb-10">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Código de Ticket</p>
-                <p className="text-2xl font-mono font-bold text-gray-900 break-all">{ticketResult?.codigo_qr}</p>
+              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 max-w-lg mx-auto mb-10 text-left">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">Códigos de Ticket</p>
+                <div className="space-y-3">
+                  {ticketResult?.map((ticket, idx) => (
+                    <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200">
+                      <div>
+                        <p className="text-xs text-gray-500 font-medium">Pasajero</p>
+                        <p className="text-sm font-bold text-gray-900">{ticket.nombres} {ticket.apellidos}</p>
+                      </div>
+                      <div className="text-right flex items-center space-x-4">
+                        <div>
+                          <p className="text-xs text-gray-500 font-medium">Código</p>
+                          <p className="text-sm font-mono font-bold text-[#f07639]">{ticket.codigo_qr}</p>
+                        </div>
+                        <button 
+                          onClick={() => handleDownloadPDF(ticket)}
+                          className="bg-[#f07639] text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-600 transition-colors shadow-sm"
+                        >
+                          Descargar PDF
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <Link href="/" className="inline-flex justify-center items-center py-3 px-8 border border-gray-300 rounded-xl shadow-sm text-lg font-bold text-gray-700 bg-white hover:bg-gray-50 transition-all">
@@ -1014,6 +1265,62 @@ function CompraContent() {
           )}
 
         </div>
+
+        {/* MODAL IMÁGENES DEL BUS */}
+        {isImagesModalOpen && busImages.length > 0 && (
+          <div 
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setIsImagesModalOpen(false)}
+          >
+            <div 
+              className="bg-white rounded-2xl overflow-hidden w-full max-w-4xl flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="p-4 border-b flex justify-between items-center bg-gray-50">
+                <h3 className="font-bold text-lg text-gray-900">Fotos del Bus</h3>
+                <button onClick={() => setIsImagesModalOpen(false)} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+              </div>
+              <div className="relative flex-1 bg-black flex items-center justify-center min-h-[400px]">
+                <img 
+                  src={busImages[currentImageIndex]} 
+                  alt="Bus" 
+                  className="max-w-full max-h-[70vh] object-contain"
+                />
+                
+                {busImages.length > 1 && (
+                  <>
+                    <button 
+                      onClick={() => setCurrentImageIndex(prev => prev === 0 ? busImages.length - 1 : prev - 1)}
+                      className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 backdrop-blur-md transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                    </button>
+                    <button 
+                      onClick={() => setCurrentImageIndex(prev => prev === busImages.length - 1 ? 0 : prev + 1)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 backdrop-blur-md transition"
+                    >
+                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                  </>
+                )}
+              </div>
+              {busImages.length > 1 && (
+                <div className="p-4 bg-gray-50 flex justify-center gap-2 overflow-x-auto">
+                  {busImages.map((img, idx) => (
+                    <button 
+                      key={idx} 
+                      onClick={() => setCurrentImageIndex(idx)}
+                      className={`w-16 h-12 rounded overflow-hidden border-2 transition-all shrink-0 ${idx === currentImageIndex ? 'border-[#f07639] opacity-100' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                    >
+                      <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
