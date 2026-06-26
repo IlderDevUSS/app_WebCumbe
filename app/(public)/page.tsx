@@ -9,8 +9,13 @@ export default async function Home() {
   const session = await getServerSession(authOptions);
 
   return (
-    <div className="flex flex-col flex-1 bg-gray-50">
-      {/* SECTION 1: BANNER PRINCIPAL Y SALUDO */}
+    <div className="flex flex-col flex-1 bg-gradient-to-br from-gray-50 via-white to-orange-50/15 relative overflow-hidden">
+      {/* Círculos decorativos de fondo con desenfoque (Glow Effect) */}
+      <div className="absolute top-[50%] -left-36 w-[450px] h-[450px] bg-orange-200/20 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+      <div className="absolute top-[70%] -right-36 w-[450px] h-[450px] bg-amber-100/25 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+
+      <div className="relative z-10 flex flex-col flex-1">
+        {/* SECTION 1: BANNER PRINCIPAL Y SALUDO */}
       <section className="relative w-full h-[300px] sm:h-[400px] lg:h-[450px]">
         {/* Background Image */}
         <div className="absolute inset-0">
@@ -89,6 +94,7 @@ export default async function Home() {
 
         </div>
       </section>
+      </div>
     </div>
   );
 }
