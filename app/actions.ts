@@ -140,7 +140,12 @@ export async function searchTrips(originId: string, destinationId: string, date:
         },
       },
       include: {
-        ruta: true,
+        ruta: {
+          include: {
+            origen: true,
+            destino: true,
+          }
+        },
         bus: true,
         asientos_viaje: true,
       },

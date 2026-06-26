@@ -392,10 +392,11 @@ function CompraContent() {
              nombres,
              apellidos,
              dni: userProfile?.dni || "",
-             telefono: userProfile?.telefono || ""
+             telefono: userProfile?.telefono || "",
+             email: session?.user?.email || ""
            };
         } else {
-           initialPasajeros[seat.id] = { nombres: "", apellidos: "", dni: "", telefono: "" };
+           initialPasajeros[seat.id] = { nombres: "", apellidos: "", dni: "", telefono: "", email: "" };
         }
       });
       setPasajeros(initialPasajeros);
@@ -412,8 +413,9 @@ function CompraContent() {
   const handlePagarConCulqi = async () => {
     // Validar todos los pasajeros
     const nameRegex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ\s]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-    for (const seat of selectedSeats) {
+    for (const [index, seat] of selectedSeats.entries()) {
       const p = pasajeros[seat.id];
       if (!p.nombres || !p.apellidos || !p.dni) {
         alert(`Faltan datos obligatorios para el pasajero (Asiento ${seat.numero_asiento}).`);
@@ -431,9 +433,15 @@ function CompraContent() {
         alert(`El DNI para el Asiento ${seat.numero_asiento} debe tener exactamente 8 números.`);
         return;
       }
-      if (p.telefono && !/^\d{9}$/.test(p.telefono)) {
-        alert(`El celular para el Asiento ${seat.numero_asiento} debe tener exactamente 9 números.`);
+      if (!p.telefono || !/^\d{9}$/.test(p.telefono)) {
+        alert(`El celular para el Asiento ${seat.numero_asiento} es obligatorio y debe tener exactamente 9 números.`);
         return;
+      }
+      if (index === 0) {
+        if (!p.email || !emailRegex.test(p.email)) {
+          alert("Debes ingresar un correo electrónico válido para el Pasajero 1 (quien recibirá los boletos).");
+          return;
+        }
       }
     }
 
@@ -442,7 +450,7 @@ function CompraContent() {
 
     try {
       const primerPasajero = pasajeros[selectedSeats[0].id];
-      const email = session?.user?.email || `invitado_${primerPasajero.dni}@elcumbe.com`;
+      const email = primerPasajero.email;
 
       // 1. Configurar el objeto Culqi global
       const Culqi = (window as any).Culqi;
@@ -819,8 +827,12 @@ function CompraContent() {
   }
 
   return (
-    <div className="bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
+    <div className="bg-gradient-to-br from-gray-50 via-white to-orange-50/15 py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden min-h-[85vh]">
+      {/* Círculos decorativos de fondo con desenfoque (Glow Effect) */}
+      <div className="absolute top-[10%] -left-36 w-96 h-96 bg-orange-200/20 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+      <div className="absolute bottom-[20%] -right-36 w-96 h-96 bg-amber-100/20 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+
+      <div className="max-w-4xl mx-auto relative z-10">
         {!paymentSuccess && renderStepper()}
 
         <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
@@ -929,6 +941,12 @@ function CompraContent() {
                   <Clock className="mx-auto h-12 w-12 text-gray-400" />
                   <h3 className="mt-2 text-sm font-medium text-gray-900">No hay viajes programados</h3>
                   <p className="mt-1 text-sm text-gray-500">Prueba cambiando la fecha o tu lugar de destino.</p>
+                  <button
+                    onClick={() => setStep(1)}
+                    className="mt-6 inline-flex items-center px-5 py-2.5 border border-transparent text-sm font-semibold rounded-xl shadow-sm text-white bg-[#f07639] hover:bg-[#e06528] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#f07639] transition-colors"
+                  >
+                    Volver a la búsqueda
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1136,15 +1154,29 @@ function CompraContent() {
                               />
                             </div>
                             <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Celular (Opcional)</label>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Celular *</label>
                               <input 
                                 type="text" 
+                                maxLength={9}
                                 value={p.telefono}
                                 onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, telefono: e.target.value.replace(/\D/g, "")}})}
                                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
                                 disabled={loading}
                               />
                             </div>
+                            {index === 0 && (
+                              <div className="sm:col-span-2">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico *</label>
+                                <input 
+                                  type="email" 
+                                  value={p.email || ""}
+                                  onChange={(e) => setPasajeros({...pasajeros, [seat.id]: {...p, email: e.target.value}})}
+                                  placeholder="ejemplo@correo.com"
+                                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#f07639] outline-none text-gray-900 bg-white text-sm"
+                                  disabled={loading}
+                                />
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -1159,9 +1191,11 @@ function CompraContent() {
 
                   <button
                     onClick={handlePagarConCulqi}
-                    disabled={loading || selectedSeats.some(seat => {
+                    disabled={loading || selectedSeats.some((seat, idx) => {
                       const p = pasajeros[seat.id];
-                      return !p || !p.nombres || !p.apellidos || !p.dni;
+                      const emailValido = idx === 0 ? (p && p.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) : true;
+                      const telefonoValido = p && p.telefono && /^\d{9}$/.test(p.telefono);
+                      return !p || !p.nombres || !p.apellidos || !p.dni || !telefonoValido || !emailValido;
                     })}
                     className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-xl shadow-lg text-lg font-bold text-white bg-gray-900 hover:bg-black focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 disabled:opacity-50 transition-all cursor-pointer"
                   >
@@ -1170,9 +1204,14 @@ function CompraContent() {
                         <Loader2 className="w-5 h-5 animate-spin mr-2" /> Procesando...
                       </>
                     ) : (
-                      <>
-                        <CheckCircle className="w-5 h-5 mr-2" /> Pagar con Culqi (Tarjeta / Yape)
-                      </>
+                      <div className="flex items-center justify-center space-x-3">
+                        <span>Pagar con</span>
+                        <img 
+                          src="/culqilogo.png" 
+                          alt="Culqi" 
+                          className="h-7 object-contain bg-white px-2 py-0.5 rounded shadow-sm"
+                        />
+                      </div>
                     )}
                   </button>
                 </div>
@@ -1219,46 +1258,51 @@ function CompraContent() {
           )}
 
           {/* PAGO EXITOSO */}
+          {/* PAGO EXITOSO */}
           {paymentSuccess && (
-            <div className="p-12 text-center">
-              <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                <CheckCircle className="w-12 h-12 text-green-500" />
+            <div className="p-6 md:p-8 text-center max-w-2xl mx-auto">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-9 h-9 text-green-500" />
               </div>
-              <h2 className="text-4xl font-extrabold text-gray-900 mb-4">¡Compra Exitosa!</h2>
-              <p className="text-lg text-gray-600 max-w-md mx-auto mb-2">
-                Tu pasaje ha sido confirmado. Presenta este código al abordar el bus.
-              </p>
-              <p className="text-sm font-medium text-green-600 max-w-md mx-auto mb-8 bg-green-50 py-2 px-4 rounded-full border border-green-200">
-                ✓ Se ha enviado una copia del boleto a tu correo.
+              <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 mb-2">¡Compra Exitosa!</h2>
+              <p className="text-sm text-gray-600 max-w-md mx-auto mb-3">
+                Tu pasaje está confirmado. Presenta el código de abordaje al subir al bus.
               </p>
               
-              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 max-w-lg mx-auto mb-10 text-left">
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-200 pb-2">Códigos de Ticket</p>
-                <div className="space-y-3">
+              <div className="inline-flex items-center px-4 py-1.5 rounded-full bg-green-50 border border-green-200 text-xs font-semibold text-green-700 mb-6">
+                ✓ Se ha enviado una copia a tu correo electrónico
+              </div>
+              
+              <div className="bg-gray-50 border border-gray-200 rounded-2xl p-4 text-left mb-6">
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-3 border-b border-gray-200 pb-1.5">Boletos Emitidos</p>
+                <div className="space-y-2.5">
                   {ticketResult?.map((ticket, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-xl border border-gray-200">
+                    <div key={idx} className="flex flex-col sm:flex-row justify-between sm:items-center bg-white p-3 rounded-xl border border-gray-200 gap-3">
                       <div>
-                        <p className="text-xs text-gray-500 font-medium">Pasajero</p>
-                        <p className="text-sm font-bold text-gray-900">{ticket.nombres} {ticket.apellidos}</p>
+                        <p className="text-[10px] text-gray-400 font-medium uppercase">Pasajero</p>
+                        <p className="text-sm font-bold text-gray-900 leading-tight">{ticket.nombres} {ticket.apellidos}</p>
                       </div>
-                      <div className="text-right flex items-center space-x-4">
+                      <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-2 sm:pt-0 border-gray-100">
                         <div>
-                          <p className="text-xs text-gray-500 font-medium">Código</p>
+                          <p className="text-[10px] text-gray-400 font-medium uppercase">Código de Abordaje</p>
                           <p className="text-sm font-mono font-bold text-[#f07639]">{ticket.codigo_qr}</p>
                         </div>
-                        <button 
-                          onClick={() => handleDownloadPDF(ticket)}
-                          className="bg-[#f07639] text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-orange-600 transition-colors shadow-sm"
-                        >
-                          Descargar PDF
-                        </button>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleDownloadPDF(ticket)}
+                            className="bg-[#f07639] text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-[#e06528] transition-all shadow-sm whitespace-nowrap"
+                            title="Descargar PDF"
+                          >
+                            Descargar PDF
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-
-              <Link href="/" className="inline-flex justify-center items-center py-3 px-8 border border-gray-300 rounded-xl shadow-sm text-lg font-bold text-gray-700 bg-white hover:bg-gray-50 transition-all">
+              
+              <Link href="/" className="inline-flex justify-center items-center py-2.5 px-6 border border-gray-300 rounded-xl shadow-sm text-sm font-bold text-gray-700 bg-white hover:bg-gray-50 transition-all">
                 Volver al Inicio
               </Link>
             </div>
@@ -1269,48 +1313,62 @@ function CompraContent() {
         {/* MODAL IMÁGENES DEL BUS */}
         {isImagesModalOpen && busImages.length > 0 && (
           <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-6"
             onClick={() => setIsImagesModalOpen(false)}
           >
             <div 
-              className="bg-white rounded-2xl overflow-hidden w-full max-w-4xl flex flex-col max-h-[90vh]"
+              className="bg-white rounded-3xl overflow-hidden w-full max-w-2xl flex flex-col max-h-[80vh] shadow-2xl border border-gray-100 relative"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-                <h3 className="font-bold text-lg text-gray-900">Fotos del Bus</h3>
-                <button onClick={() => setIsImagesModalOpen(false)} className="text-gray-500 hover:text-gray-800 text-2xl leading-none">&times;</button>
+              {/* Header del Modal */}
+              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-white">
+                <h3 className="font-extrabold text-base text-gray-900 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#f07639]"></span>
+                  Fotos del Bus
+                </h3>
+                <button 
+                  onClick={() => setIsImagesModalOpen(false)} 
+                  className="text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors w-8 h-8 rounded-full flex items-center justify-center font-bold text-lg"
+                >
+                  &times;
+                </button>
               </div>
-              <div className="relative flex-1 bg-black flex items-center justify-center min-h-[400px]">
+
+              {/* Contenedor de la Imagen */}
+              <div className="relative flex-1 bg-gray-950 flex items-center justify-center min-h-[300px] overflow-hidden">
                 <img 
                   src={busImages[currentImageIndex]} 
                   alt="Bus" 
-                  className="max-w-full max-h-[70vh] object-contain"
+                  className="max-w-full max-h-[45vh] object-contain transition-all duration-300"
                 />
                 
+                {/* Controles de Navegación Lateral */}
                 {busImages.length > 1 && (
                   <>
                     <button 
                       onClick={() => setCurrentImageIndex(prev => prev === 0 ? busImages.length - 1 : prev - 1)}
-                      className="absolute left-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 backdrop-blur-md transition"
+                      className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-2 backdrop-blur-md transition-colors"
                     >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path></svg>
                     </button>
                     <button 
                       onClick={() => setCurrentImageIndex(prev => prev === busImages.length - 1 ? 0 : prev + 1)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 backdrop-blur-md transition"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full p-2 backdrop-blur-md transition-colors"
                     >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7"></path></svg>
                     </button>
                   </>
                 )}
               </div>
+
+              {/* Thumbnails en la parte inferior */}
               {busImages.length > 1 && (
-                <div className="p-4 bg-gray-50 flex justify-center gap-2 overflow-x-auto">
+                <div className="p-3 bg-gray-50 border-t border-gray-100 flex justify-center gap-2 overflow-x-auto">
                   {busImages.map((img, idx) => (
                     <button 
                       key={idx} 
                       onClick={() => setCurrentImageIndex(idx)}
-                      className={`w-16 h-12 rounded overflow-hidden border-2 transition-all shrink-0 ${idx === currentImageIndex ? 'border-[#f07639] opacity-100' : 'border-transparent opacity-50 hover:opacity-100'}`}
+                      className={`w-14 h-10 rounded-lg overflow-hidden border-2 transition-all shrink-0 ${idx === currentImageIndex ? 'border-[#f07639] scale-105 shadow-sm' : 'border-transparent opacity-60 hover:opacity-100'}`}
                     >
                       <img src={img} alt="Thumbnail" className="w-full h-full object-cover" />
                     </button>
