@@ -18,7 +18,6 @@ export default function SeguimientoPage() {
     const isChecked = e.target.checked;
     setUseRegisteredDni(isChecked);
     
-    // Type cast to any to avoid TS errors if next-auth type is not extended
     const userDni = (session?.user as any)?.dni;
     if (isChecked && userDni) {
       setDni(userDni);
@@ -43,7 +42,6 @@ export default function SeguimientoPage() {
     }
   };
 
-  // Filter encomiendas
   const enCurso = encomiendas.filter((enc) => ["recepcionado", "en_transito", "listo_para_recojo"].includes(enc.estado));
   const historial = encomiendas.filter((enc) => enc.estado === "entregado");
   const currentList = activeTab === "en_curso" ? enCurso : historial;
@@ -51,41 +49,121 @@ export default function SeguimientoPage() {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "recepcionado":
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"><CheckCircle className="w-3 h-3 mr-1" /> Recepcionado</span>;
+        return <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-100"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Recepcionado</span>;
       case "en_transito":
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800"><Truck className="w-3 h-3 mr-1" /> En Tránsito</span>;
+        return <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-orange-50 text-orange-700 border border-orange-100"><Truck className="w-3.5 h-3.5 mr-1" /> En Tránsito</span>;
       case "listo_para_recojo":
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"><MapPin className="w-3 h-3 mr-1" /> Listo para recojo</span>;
+        return <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-100"><MapPin className="w-3.5 h-3.5 mr-1" /> Listo para Recojo</span>;
       case "entregado":
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" /> Entregado</span>;
+        return <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-green-50 text-green-700 border border-green-100"><CheckCircle className="w-3.5 h-3.5 mr-1" /> Entregado</span>;
       default:
-        return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{status}</span>;
+        return <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-gray-50 text-gray-700 border border-gray-100">{status}</span>;
     }
   };
 
+  const getProgressStep = (status: string) => {
+    switch (status) {
+      case "recepcionado": return 1;
+      case "en_transito": return 2;
+      case "listo_para_recojo": return 3;
+      case "entregado": return 4;
+      default: return 0;
+    }
+  };
+
+  const renderProgressBar = (status: string) => {
+    const currentStep = getProgressStep(status);
+    const steps = [
+      { label: "Recepcionado", desc: "En oficina de origen" },
+      { label: "En Tránsito", desc: "Viajando al destino" },
+      { label: "Listo para Recojo", desc: "En oficina destino" },
+      { label: "Entregado", desc: "Paquete entregado" }
+    ];
+
+    return (
+      <div className="mt-8 mb-4 px-1">
+        <div className="relative">
+          {/* Línea de fondo */}
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+            <div className="w-full bg-gray-100 h-1.5 rounded-full"></div>
+          </div>
+          {/* Línea de progreso activa */}
+          <div className="absolute inset-0 flex items-center" aria-hidden="true">
+            <div 
+              className="bg-gradient-to-r from-[#f07639] to-orange-500 h-1.5 rounded-full transition-all duration-500" 
+              style={{ width: `${((Math.max(1, currentStep) - 1) / 3) * 100}%` }}
+            ></div>
+          </div>
+          
+          <div className="relative flex justify-between">
+            {steps.map((step, idx) => {
+              const stepNum = idx + 1;
+              const isCompleted = stepNum < currentStep;
+              const isActive = stepNum === currentStep;
+              
+              return (
+                <div key={idx} className="flex flex-col items-center">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all duration-300 z-10 ${
+                    isCompleted 
+                      ? "bg-[#f07639] border-[#f07639] text-white shadow-sm" 
+                      : isActive 
+                        ? "bg-white border-[#f07639] text-[#f07639] shadow-md scale-110 ring-4 ring-orange-100" 
+                        : "bg-white border-gray-200 text-gray-400"
+                  }`}>
+                    {isCompleted ? (
+                      <CheckCircle className="w-4 h-4" />
+                    ) : (
+                      <span className="text-xs font-extrabold">{stepNum}</span>
+                    )}
+                  </div>
+                  <span className={`text-[10px] sm:text-xs font-bold mt-2 text-center max-w-[80px] sm:max-w-none transition-colors ${
+                    isActive ? "text-[#f07639]" : isCompleted ? "text-gray-900" : "text-gray-400"
+                  }`}>
+                    {step.label}
+                  </span>
+                  <span className="hidden sm:block text-[9px] text-gray-400 mt-0.5 text-center max-w-[100px] leading-tight">
+                    {step.desc}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-2">Rastrear Encomienda</h1>
-          <p className="text-lg text-gray-600">
-            Ingresa el DNI del remitente para consultar el estado actualizado de los envíos.
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-orange-50/15 py-10 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+      {/* Círculos decorativos de fondo con desenfoque (Glow Effect) */}
+      <div className="absolute top-[10%] -left-36 w-96 h-96 bg-orange-200/30 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+      <div className="absolute bottom-[20%] -right-36 w-96 h-96 bg-amber-100/30 rounded-full filter blur-3xl pointer-events-none z-0"></div>
+
+      <div className="max-w-3xl mx-auto relative z-10">
+        {/* Encabezado */}
+        <div className="text-center mb-8">
+          <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-orange-100/50 text-[#d8662d] uppercase tracking-wider mb-3">
+            📍 Estado de Envíos
+          </span>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-gray-900 tracking-tight mb-2">Rastrear Encomienda</h1>
+          <p className="text-sm sm:text-base text-gray-500 max-w-md mx-auto">
+            Ingresa el DNI del remitente para consultar el estado actualizado de tu envío en tiempo real.
           </p>
         </div>
 
         {/* Search Box */}
-        <div className="bg-white shadow-xl rounded-2xl p-6 md:p-8 mb-8 border border-gray-100">
-          <form onSubmit={handleSearch}>
-            <div className="flex flex-col md:flex-row gap-4">
+        <div className="bg-white shadow-xl shadow-gray-100 rounded-3xl p-5 md:p-6 mb-8 border border-gray-100">
+          <form onSubmit={handleSearch} className="space-y-4">
+            <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 relative">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Search className="h-6 w-6 text-gray-400" />
+                  <Search className="h-5 w-5 text-gray-400" />
                 </div>
                 <input
                   type="text"
                   maxLength={8}
-                  className="focus:ring-[#f07639] focus:border-[#f07639] block w-full pl-12 sm:text-lg border-gray-300 rounded-xl py-4 border bg-gray-50 text-gray-900 transition-colors"
-                  placeholder="Número de DNI..."
+                  className="focus:ring-2 focus:ring-[#f07639]/20 focus:border-[#f07639] block w-full pl-11 text-base border-gray-200 rounded-2xl py-3.5 border bg-gray-50 text-gray-900 transition-all placeholder-gray-400 outline-none"
+                  placeholder="Número de DNI del remitente..."
                   value={dni}
                   onChange={(e) => {
                      setDni(e.target.value.replace(/\D/g, ""));
@@ -98,24 +176,26 @@ export default function SeguimientoPage() {
               <button
                 type="submit"
                 disabled={loading || dni.length < 8}
-                className="inline-flex justify-center items-center py-4 px-10 border border-transparent rounded-xl shadow-sm text-lg font-bold text-white bg-[#f07639] hover:bg-[#d8662d] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#f07639] disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="inline-flex justify-center items-center py-3.5 px-8 border border-transparent rounded-2xl shadow-sm text-base font-bold text-white bg-[#f07639] hover:bg-[#d8662d] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#f07639] disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
               >
-                {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : "Buscar"}
+                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Buscar Encomienda"}
               </button>
             </div>
             
             {(session?.user as any)?.dni && (
-              <div className="mt-5 flex items-center bg-orange-50 p-3 rounded-lg border border-orange-100 w-fit">
-                <input
-                  id="use-dni"
-                  name="use-dni"
-                  type="checkbox"
-                  className="h-5 w-5 text-[#f07639] focus:ring-[#f07639] border-gray-300 rounded cursor-pointer"
-                  checked={useRegisteredDni}
-                  onChange={handleCheckboxChange}
-                />
-                <label htmlFor="use-dni" className="ml-3 block text-sm font-medium text-gray-800 cursor-pointer select-none">
-                  Usar mi DNI registrado ({(session?.user as any)?.dni})
+              <div className="flex items-center">
+                <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                  <input
+                    id="use-dni"
+                    name="use-dni"
+                    type="checkbox"
+                    className="h-4 w-4 text-[#f07639] focus:ring-[#f07639] border-gray-300 rounded transition-colors"
+                    checked={useRegisteredDni}
+                    onChange={handleCheckboxChange}
+                  />
+                  <span className="text-xs font-semibold text-gray-500 hover:text-gray-700 transition-colors">
+                    Usar mi DNI registrado ({(session?.user as any)?.dni})
+                  </span>
                 </label>
               </div>
             )}
@@ -124,79 +204,92 @@ export default function SeguimientoPage() {
 
         {/* Results Area */}
         {hasSearched && !loading && (
-          <div>
-            <div className="border-b border-gray-200 mb-6">
-              <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+          <div className="space-y-6">
+            {/* Tabs */}
+            <div className="flex justify-center">
+              <div className="bg-gray-100 p-1 rounded-2xl inline-flex space-x-1 border border-gray-200/50">
                 <button
                   onClick={() => setActiveTab("en_curso")}
-                  className={`${
+                  className={`whitespace-nowrap py-2 px-5 rounded-xl font-bold text-sm flex items-center transition-all duration-300 cursor-pointer ${
                     activeTab === "en_curso"
-                      ? "border-[#f07639] text-[#f07639]"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg flex items-center transition-colors`}
+                      ? "bg-white text-[#f07639] shadow-sm"
+                      : "text-gray-500 hover:text-gray-900"
+                  }`}
                 >
-                  <Package className="w-5 h-5 mr-2" />
+                  <Package className="w-4 h-4 mr-2" />
                   En Curso ({enCurso.length})
                 </button>
                 <button
                   onClick={() => setActiveTab("historial")}
-                  className={`${
+                  className={`whitespace-nowrap py-2 px-5 rounded-xl font-bold text-sm flex items-center transition-all duration-300 cursor-pointer ${
                     activeTab === "historial"
-                      ? "border-[#f07639] text-[#f07639]"
-                      : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-lg flex items-center transition-colors`}
+                      ? "bg-white text-[#f07639] shadow-sm"
+                      : "text-gray-500 hover:text-gray-900"
+                  }`}
                 >
-                  <Clock className="w-5 h-5 mr-2" />
+                  <Clock className="w-4 h-4 mr-2" />
                   Historial ({historial.length})
                 </button>
-              </nav>
+              </div>
             </div>
 
             {currentList.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl shadow-sm border border-gray-100">
-                <Package className="mx-auto h-16 w-16 text-gray-300 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900">No hay encomiendas</h3>
-                <p className="mt-2 text-md text-gray-500">
+              <div className="text-center py-16 bg-white rounded-3xl shadow-xl shadow-gray-100/50 border border-gray-100/80">
+                <Package className="mx-auto h-14 w-14 text-gray-300 mb-3" />
+                <h3 className="text-lg font-bold text-gray-800">No hay encomiendas</h3>
+                <p className="mt-1 text-sm text-gray-500 max-w-sm mx-auto">
                   {activeTab === "en_curso"
                     ? "No hemos encontrado encomiendas activas asociadas a este DNI."
                     : "No hay registros de encomiendas entregadas en tu historial."}
                 </p>
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-5">
                 {currentList.map((enc) => (
-                  <div key={enc.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-lg transition-shadow duration-300">
+                  <div key={enc.id} className="bg-white rounded-3xl shadow-xl shadow-gray-100/50 border border-gray-100 overflow-hidden hover:shadow-2xl hover:shadow-gray-200/30 transition-all duration-300">
                     <div className="p-6 md:p-8">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 border-b border-gray-100 pb-4">
                         <div className="flex items-center space-x-3">
-                          <span className="text-sm font-bold text-gray-400 uppercase tracking-wider">Tracking</span>
-                          <span className="text-lg font-extrabold text-[#f07639]">#{enc.codigo_seguimiento}</span>
+                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-50 px-2.5 py-1 rounded">Envío</span>
+                          <span className="text-lg font-black text-gray-900">#{enc.codigo_seguimiento}</span>
                         </div>
                         <div>{getStatusBadge(enc.estado)}</div>
                       </div>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 rounded-xl p-5 border border-gray-100">
-                        <div>
-                          <p className="text-sm text-gray-500 mb-2 font-medium">Ruta del Envío</p>
-                          <div className="flex items-center text-gray-900 font-bold text-lg">
-                            <span>{enc.origen?.nombre}</span>
-                            <ArrowRight className="w-5 h-5 mx-3 text-gray-400" />
-                            <span>{enc.destino?.nombre}</span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div className="bg-gradient-to-br from-orange-50/20 to-orange-100/5 rounded-2xl p-4 border border-orange-100/40">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Trayecto</p>
+                          <div className="flex items-center text-gray-800 font-extrabold text-sm sm:text-base">
+                            <span className="bg-orange-500 text-white w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] mr-2">O</span>
+                            <span className="truncate">{enc.origen?.nombre}</span>
+                            <ArrowRight className="w-4 h-4 mx-3 text-orange-400 flex-shrink-0" />
+                            <span className="bg-green-600 text-white w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] mr-2">D</span>
+                            <span className="truncate">{enc.destino?.nombre}</span>
                           </div>
                         </div>
-                        <div>
-                          <p className="text-sm text-gray-500 mb-2 font-medium">Detalles del Paquete</p>
-                          <p className="text-gray-900 font-semibold text-lg">{enc.peso_kg} kg <span className="mx-2 text-gray-300">|</span> S/ {enc.precio}</p>
+                        
+                        <div className="bg-gradient-to-br from-gray-50/50 to-gray-100/20 rounded-2xl p-4 border border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Carga y Costo</p>
+                          <div className="flex items-center text-gray-800 font-bold text-sm sm:text-base">
+                            <Package className="w-4 h-4 text-gray-400 mr-2" />
+                            <span>{enc.peso_kg} kg</span>
+                            <span className="mx-2 text-gray-300">|</span>
+                            <span className="text-[#f07639] font-black">S/ {enc.precio}</span>
+                          </div>
                         </div>
                       </div>
                       
-                      <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                        <div className="flex items-center text-sm text-gray-500 font-medium bg-gray-50 px-3 py-1.5 rounded-md">
+                      {/* Barra de progreso de envío interactiva */}
+                      {renderProgressBar(enc.estado)}
+                      
+                      <div className="mt-8 pt-5 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-center text-xs text-gray-500 font-semibold bg-gray-50 px-3 py-1.5 rounded-xl border border-gray-100">
                           <Calendar className="flex-shrink-0 mr-2 h-4 w-4 text-gray-400" />
-                          <p>Registrado el {new Date(enc.created_at).toLocaleDateString()}</p>
+                          <span>Registrado: {new Date(enc.created_at).toLocaleDateString()}</span>
                         </div>
-                        <div className="text-sm text-gray-700 bg-orange-50 text-[#d8662d] px-3 py-1.5 rounded-md font-semibold border border-orange-100">
-                          Receptor: {enc.destinatario_nombre}
+                        <div className="text-xs text-orange-950 bg-orange-50 px-3 py-1.5 rounded-xl font-bold border border-orange-100 flex items-center">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#f07639] mr-2"></span>
+                          Destinatario: {enc.destinatario_nombre}
                         </div>
                       </div>
                     </div>
