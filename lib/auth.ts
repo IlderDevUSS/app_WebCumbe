@@ -16,27 +16,10 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Faltan credenciales");
         }
 
-        // Buscar primero en la tabla cliente
-        const cliente = await prisma.cliente.findUnique({
-          where: { correo: credentials.email }
+        const user = await prisma.usuario.findUnique({
+          where: { correo: credentials.email },
+          include: { persona: true }
         });
-
-        let user = null;
-        let role = "cliente";
-
-        if (cliente) {
-          user = cliente;
-          role = "cliente";
-        } else {
-          // Si no es cliente, buscar en la tabla usuario (administrativos/operarios)
-          const adminUser = await prisma.usuario.findUnique({
-            where: { correo: credentials.email }
-          });
-          if (adminUser) {
-            user = adminUser;
-            role = adminUser.rol; // 'admin' o 'operario'
-          }
-        }
 
         if (!user) {
           throw new Error("Usuario no encontrado");
@@ -48,12 +31,14 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Contraseña incorrecta");
         }
 
+        const fullName = `${user.persona.nombres} ${user.persona.apellidos}`.trim();
+
         // Convert BigInt id to string for NextAuth compatibility
         return {
           id: user.id.toString(),
           email: user.correo,
-          name: user.nombre,
-          role: role,
+          name: fullName,
+          role: user.rol,
         };
       }
     })

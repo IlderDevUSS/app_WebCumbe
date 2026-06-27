@@ -61,7 +61,7 @@ export async function obtenerAsientosPorViaje(viajeId: string | number) {
       orderBy: { numero_asiento: "asc" },
       include: {
         pasaje: {
-          include: { cliente: true }
+          include: { pasajero: true, comprador: true }
         }
       }
     });
@@ -78,12 +78,12 @@ export async function buscarPasajeroPorDni(dni: string) {
   if (!dni || dni.length < 5) return { success: false };
 
   try {
-    const usuario = await prisma.cliente.findUnique({
+    const persona = await prisma.persona.findUnique({
       where: { dni: dni }
     });
 
-    if (usuario) {
-      return { success: true, data: serializeBigInt(usuario) };
+    if (persona) {
+      return { success: true, data: serializeBigInt(persona) };
     }
     return { success: false };
   } catch (error) {
@@ -117,25 +117,28 @@ export async function venderPasaje(data: {
       if (!asiento) throw new Error("Asiento no encontrado.");
       if (asiento.estado !== "disponible") throw new Error("El asiento ya no está disponible.");
 
-      // b) Buscar el usuario por DNI si existe, pero ya no forzamos creación de cuenta fantasma
-      let usuarioId: bigint | null = null;
-      const usuario = await tx.cliente.findUnique({
-        where: { dni: data.pasajero.dni }
-      });
-
-      if (usuario) {
-        usuarioId = usuario.id;
-      }
-
-      // c) Crear el pasaje con los campos embebidos
-      const nuevoPasaje = await tx.pasaje.create({
-        data: {
-          asiento_viaje_id: aId,
+      // b) Buscar a la persona por DNI y crearla si no existe (upsert)
+      const persona = await tx.persona.upsert({
+        where: { dni: data.pasajero.dni },
+        create: {
           nombres: data.pasajero.nombres.toUpperCase(),
           apellidos: data.pasajero.apellidos.toUpperCase(),
           dni: data.pasajero.dni,
           telefono: data.pasajero.telefono || null,
-          usuario_id: usuarioId as any, // Puede ser null si es una venta rápida a alguien que no está registrado
+        },
+        update: {
+          // Si ya existe, podríamos actualizar el teléfono
+          telefono: data.pasajero.telefono || undefined,
+        }
+      });
+
+      // c) Crear el pasaje vinculándolo a la Persona
+      const nuevoPasaje = await tx.pasaje.create({
+        data: {
+          asiento_viaje_id: aId,
+          persona_id: persona.id,
+          // Al ser venta presencial (admin), el comprador (web) es null
+          comprador_id: null,
           precio: data.precio,
           codigo_qr: `TKT-${Date.now()}-${Math.floor(Math.random() * 1000)}`
         }
@@ -155,5 +158,77 @@ export async function venderPasaje(data: {
   } catch (error: any) {
     console.error("Error al vender pasaje:", error);
     return { success: false, error: error.message || "Error interno al vender el pasaje." };
+  }
+}
+
+// 5. Buscar Pasajes Vendidos (Filtros)
+export async function buscarPasajesVendidos(filtros: { origenId?: string, destinoId?: string, fecha?: string, dni?: string }) {
+  try {
+    const whereClause: any = {};
+
+    // Filtro por fecha (fecha de salida del viaje)
+    if (filtros.fecha) {
+      const fechaInicio = new Date(`${filtros.fecha}T00:00:00.000Z`);
+      const fechaFin = new Date(`${filtros.fecha}T23:59:59.999Z`);
+      whereClause.asiento_viaje = {
+        viaje: {
+          fecha_salida: {
+            gte: fechaInicio,
+            lte: fechaFin
+          }
+        }
+      };
+    }
+
+    // Filtro por origen / destino
+    if (filtros.origenId || filtros.destinoId) {
+      if (!whereClause.asiento_viaje) whereClause.asiento_viaje = { viaje: {} };
+      if (!whereClause.asiento_viaje.viaje) whereClause.asiento_viaje.viaje = {};
+      
+      const rutaFilter: any = {};
+      if (filtros.origenId) rutaFilter.origen_id = BigInt(filtros.origenId);
+      if (filtros.destinoId) rutaFilter.destino_id = BigInt(filtros.destinoId);
+      
+      whereClause.asiento_viaje.viaje.ruta = rutaFilter;
+    }
+
+    // Filtro por DNI del pasajero
+    if (filtros.dni && filtros.dni.trim() !== "") {
+      whereClause.pasajero = {
+        dni: { contains: filtros.dni }
+      };
+    }
+
+    const pasajes = await prisma.pasaje.findMany({
+      where: whereClause,
+      include: {
+        pasajero: true,
+        comprador: true,
+        asiento_viaje: {
+          include: {
+            viaje: {
+              include: {
+                ruta: {
+                  include: {
+                    origen: true,
+                    destino: true
+                  }
+                },
+                bus: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        fecha_compra: 'desc'
+      },
+      take: 100 // Limitar resultados
+    });
+
+    return { success: true, data: serializeBigInt(pasajes) };
+  } catch (error) {
+    console.error("Error al buscar pasajes vendidos:", error);
+    return { success: false, error: "Error al buscar pasajes vendidos." };
   }
 }

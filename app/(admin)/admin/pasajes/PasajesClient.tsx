@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Search, MapPin, Calendar, Clock, CreditCard, User, Tag, ChevronRight, CheckCircle2, Ticket } from "lucide-react";
 import { buscarViajes, obtenerAsientosPorViaje, buscarPasajeroPorDni, venderPasaje } from "../../actions/pasajes";
+import ListaPasajes from "./ListaPasajes";
 
 type Sucursal = { id: string; nombre: string };
 type Ruta = { id: string; precio_base: string };
@@ -20,6 +21,9 @@ export default function PasajesClient({ initialSucursales }: { initialSucursales
   const [origenId, setOrigenId] = useState<string>("");
   const [destinoId, setDestinoId] = useState<string>("");
   const [fecha, setFecha] = useState<string>(new Date().toISOString().split('T')[0]);
+
+  // Vista actual
+  const [view, setView] = useState<"venta" | "lista">("venta");
   
   // Resultados Viajes
   const [viajes, setViajes] = useState<Viaje[]>([]);
@@ -136,8 +140,32 @@ export default function PasajesClient({ initialSucursales }: { initialSucursales
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       
-      {/* Top Bar: Buscador */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4 flex-shrink-0">
+      {/* Selector de Vista */}
+      <div className="bg-white p-2 rounded-2xl shadow-sm border border-gray-100 mb-4 flex-shrink-0 flex space-x-2">
+        <button
+          onClick={() => setView("venta")}
+          className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors flex items-center justify-center ${
+            view === "venta" ? "bg-[#f07639] text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+          }`}
+        >
+          <CreditCard className="w-5 h-5 mr-2" /> Vender Pasaje
+        </button>
+        <button
+          onClick={() => setView("lista")}
+          className={`flex-1 py-3 px-4 rounded-xl font-bold transition-colors flex items-center justify-center ${
+            view === "lista" ? "bg-[#f07639] text-white" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+          }`}
+        >
+          <Ticket className="w-5 h-5 mr-2" /> Pasajes Vendidos
+        </button>
+      </div>
+
+      {view === "lista" ? (
+        <ListaPasajes sucursales={initialSucursales} />
+      ) : (
+        <>
+          {/* Top Bar: Buscador */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4 flex-shrink-0">
         <form onSubmit={handleBuscarViajes} className="flex flex-wrap items-end gap-4">
           <div className="flex-1 min-w-[200px]">
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Origen</label>
@@ -484,6 +512,8 @@ export default function PasajesClient({ initialSucursales }: { initialSucursales
         </div>
         
       </div>
+      </>
+      )}
     </div>
   );
 }

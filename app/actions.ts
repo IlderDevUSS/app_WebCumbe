@@ -208,13 +208,24 @@ export async function getTripSeats(tripId: string) {
       });
       const capacity = trip?.bus?.capacidad || 40;
       const pisos = trip?.bus?.pisos || 1;
+      const asientosPiso1 = (trip?.bus as any)?.asientos_piso_1 || Math.floor(capacity / 2);
       
-      const newSeatsData = Array.from({ length: capacity }).map((_, i) => ({
-        viaje_id: BigInt(tripId),
-        numero_asiento: i + 1,
-        piso: pisos === 2 && i >= capacity / 2 ? 2 : 1,
-        estado: "disponible" as const
-      }));
+      let restringidos: number[] = [];
+      if ((trip?.bus as any)?.asientos_restringidos) {
+        try {
+          restringidos = JSON.parse((trip?.bus as any).asientos_restringidos);
+        } catch (e) {}
+      }
+      
+      const newSeatsData = Array.from({ length: capacity }).map((_, i) => {
+        const num = i + 1;
+        return {
+          viaje_id: BigInt(tripId),
+          numero_asiento: num,
+          piso: pisos === 2 && i >= asientosPiso1 ? 2 : 1,
+          estado: (restringidos.includes(num) ? "inactivo" : "disponible") as "inactivo" | "disponible"
+        };
+      });
 
       await prisma.asientoViaje.createMany({ data: newSeatsData });
 

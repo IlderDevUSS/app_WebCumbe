@@ -29,7 +29,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existingUser = await prisma.cliente.findUnique({
+    // Verificar si el correo ya está en uso por otro Usuario
+    const existingUser = await prisma.usuario.findUnique({
       where: { correo: email },
     });
 
@@ -40,36 +41,65 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existingDni = await prisma.cliente.findUnique({
-      where: { dni },
+    const result = await prisma.$transaction(async (tx) => {
+      // Como el front envía 'name', lo dividimos temporalmente
+      const partes = name.trim().split(" ");
+      const nombres = partes[0] || "";
+      const apellidos = partes.length > 1 ? partes.slice(1).join(" ") : ".";
+
+      // 1. Buscar o crear la Persona
+      const persona = await tx.persona.upsert({
+        where: { dni },
+        update: {
+          // Opcional: podríamos actualizar el teléfono si cambió
+          telefono: phone
+        },
+        create: {
+          nombres: nombres.toUpperCase(),
+          apellidos: apellidos.toUpperCase(),
+          dni,
+          telefono: phone,
+        },
+      });
+
+      // 2. Validar que la Persona no tenga ya un Usuario web asociado
+      const usuarioExistente = await tx.usuario.findUnique({
+        where: { persona_id: persona.id },
+      });
+
+      if (usuarioExistente) {
+        throw new Error("DNI_REGISTRADO");
+      }
+
+      // 3. Hashear password y crear el Usuario
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const newUser = await tx.usuario.create({
+        data: {
+          persona_id: persona.id,
+          correo: email,
+          contrasena: hashedPassword,
+          rol: "cliente",
+        },
+      });
+
+      return newUser;
     });
 
-    if (existingDni) {
+    return NextResponse.json(
+      { message: "Usuario registrado con éxito", userId: result.id.toString() },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    console.error("Error en el registro:", error);
+    
+    if (error.message === "DNI_REGISTRADO") {
       return NextResponse.json(
-        { message: "El DNI ya está registrado" },
+        { message: "El DNI ya tiene una cuenta vinculada" },
         { status: 400 }
       );
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newUser = await prisma.cliente.create({
-      data: {
-        nombre: name,
-        correo: email,
-        contrasena: hashedPassword,
-        dni,
-        telefono: phone,
-        fecha_nacimiento: birthDateObj,
-      },
-    });
-
-    return NextResponse.json(
-      { message: "Usuario registrado con éxito", userId: newUser.id.toString() },
-      { status: 201 }
-    );
-  } catch (error) {
-    console.error("Error en el registro:", error);
     return NextResponse.json(
       { message: "Error interno del servidor" },
       { status: 500 }
