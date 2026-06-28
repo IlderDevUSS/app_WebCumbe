@@ -27,8 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import Script from "next/script";
-import { jsPDF } from "jspdf";
-import QRCode from "qrcode";
+import { generateBoletoPDF } from "@/lib/pdfUtils";
 
 function CompraContent() {
   const { data: session, status } = useSession();
@@ -158,83 +157,39 @@ function CompraContent() {
   }, [step, paymentSuccess, selectedTrip]);
 
   const handleDownloadPDF = async (ticket: any) => {
-    const doc = new jsPDF();
-    const seat = selectedSeats.find(s => String(s.id) === String(ticket.asiento_viaje_id));
+    const seatId = ticket.asiento_viaje_id;
+    const seat = selectedTrip?.asientos?.find((a: any) => a.id === seatId || a.id === String(seatId) || BigInt(a.id) === seatId);
     
-    // Header
-    doc.setFillColor(255, 255, 255);
-    doc.rect(0, 0, 210, 30, "F");
-    
-    // Cargar Logo
-    const logoImg = new window.Image();
-    logoImg.src = '/logocumbe.png';
-    await new Promise((resolve) => {
-      logoImg.onload = () => {
-        // x=20, y=5, width=60, height=20 (Ajustar según aspect ratio)
-        doc.addImage(logoImg, 'PNG', 20, 5, 55, 18);
-        resolve(true);
-      };
-      logoImg.onerror = () => resolve(false); // Ignorar si falla
-    });
-    
-    doc.setTextColor(240, 118, 57);
-    doc.setFontSize(22);
-    doc.setFont("helvetica", "bold");
-    doc.text("BOLETO DE VIAJE", 190, 20, { align: "right" });
-    
-    // Línea separadora naranja
-    doc.setDrawColor(240, 118, 57);
-    doc.setLineWidth(1);
-    doc.line(20, 30, 190, 30);
-    
-    // Content
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(14);
-    doc.text("Información del Pasajero", 20, 45);
-    doc.setLineWidth(0.5);
-    doc.line(20, 48, 190, 48);
-    
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Pasajero: ${ticket.nombres} ${ticket.apellidos}`, 20, 60);
-    doc.text(`DNI: ${ticket.dni}`, 20, 70);
-    
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
-    doc.text("Detalles del Viaje", 20, 95);
-    doc.line(20, 98, 190, 98);
-    
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Origen: ${selectedTrip?.ruta?.origen?.nombre || ""}`, 20, 110);
-    doc.text(`Destino: ${selectedTrip?.ruta?.destino?.nombre || ""}`, 20, 120);
-    const dateStr = selectedTrip ? new Date(selectedTrip.fecha_salida || selectedTrip.departure_time).toLocaleDateString() : "";
-    const timeStr = selectedTrip ? new Date(selectedTrip.fecha_salida || selectedTrip.departure_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "";
-    doc.text(`Fecha y Hora: ${dateStr} - ${timeStr}`, 20, 130);
-    
+    const dateObj = selectedTrip ? new Date(selectedTrip.fecha_salida || selectedTrip.departure_time) : new Date();
+    const dateStr = dateObj.toLocaleDateString();
+    const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const tipoBus = selectedTrip?.bus?.pisos === 2 ? "Buscama" : "Normal";
-    doc.text(`Servicio: Bus ${tipoBus} (Placa: ${selectedTrip?.bus?.placa || "-"})`, 20, 150);
-    doc.setFont("helvetica", "bold");
-    doc.text(`Asiento N°: ${seat?.numero_asiento || "-"} (Piso ${seat?.piso || "-"})`, 20, 160);
-    
-    try {
-      // Generar imagen QR
-      const qrDataUrl = await QRCode.toDataURL(ticket.codigo_qr, { width: 150, margin: 1 });
-      doc.addImage(qrDataUrl, "PNG", 80, 175, 50, 50); // Centrado (210/2 - 25 = 80), y=175
-      
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      doc.setTextColor(100, 100, 100);
-      doc.text(ticket.codigo_qr, 105, 230, { align: "center" });
-    } catch (err) {
-      console.error("Error generando QR", err);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(16);
-      doc.setTextColor(240, 118, 57);
-      doc.text(`CÓDIGO DE ABORDAJE: ${ticket.codigo_qr}`, 105, 190, { align: "center" });
-    }
-    
-    doc.save(`Boleto_${ticket.dni}.pdf`);
+
+    await generateBoletoPDF({
+      pasajero: {
+        nombres: ticket.nombres || "",
+        apellidos: ticket.apellidos || "",
+        dni: ticket.dni || "",
+      },
+      viaje: {
+        origen: selectedTrip?.ruta?.origen?.nombre || "",
+        destino: selectedTrip?.ruta?.destino?.nombre || "",
+        fecha_salida: dateStr,
+        hora_salida: timeStr,
+        tipoBus: tipoBus,
+        placa: selectedTrip?.bus?.placa || "-",
+      },
+      asiento: {
+        numero: seat?.numero_asiento || "-",
+        piso: seat?.piso || "-",
+      },
+      pago: {
+        precio: ticket.precio || 0,
+      },
+      ticket: {
+        codigo_qr: ticket.codigo_qr || "",
+      },
+    });
   };
 
   const formatTime = (seconds: number) => {

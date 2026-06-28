@@ -39,6 +39,7 @@ export const authOptions: NextAuthOptions = {
           email: user.correo,
           name: fullName,
           role: user.rol,
+          dni: user.persona.dni,
         };
       }
     })
@@ -49,6 +50,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        token.dni = user.dni;
       }
       return token;
     },
@@ -56,6 +58,7 @@ export const authOptions: NextAuthOptions = {
       if (token) {
         session.user.id = token.id as string;
         session.user.role = token.role as string;
+        session.user.dni = token.dni as string;
       }
       return session;
     }

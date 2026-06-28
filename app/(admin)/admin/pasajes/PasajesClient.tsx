@@ -296,17 +296,165 @@ export default function PasajesClient({ initialSucursales }: { initialSucursales
                 {[1, 2].map(piso => {
                   const asientosPiso = asientos.filter(a => a.piso === piso);
                   if (asientosPiso.length === 0) return null;
+                  
+                  // Use selectedViaje properties safely
+                  const isBuscama = selectedViaje?.bus?.pisos === 2;
+
+                  const renderTVIcon = () => (
+                    <svg className="w-4 h-4 text-gray-400 opacity-70 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="7" width="20" height="13" rx="2" />
+                      <path d="M8 3l4 4 4-4" />
+                    </svg>
+                  );
+
+                  const renderAsientoButton = (seat: any, esPiso1: boolean) => {
+                    if (!seat) return <div className="w-8 h-8" />;
+                    const isSelected = selectedAsiento?.id === seat.id;
+                    const isOcupadoStatus = seat.estado !== "disponible";
+
+                    let colorClass = "text-[#7c2d12] hover:text-orange-600 bg-transparent hover:scale-105";
+                    if (isOcupadoStatus) {
+                      colorClass = "text-gray-300 bg-transparent cursor-not-allowed";
+                    } else if (isSelected) {
+                      colorClass = "text-white bg-[#f07639] border-[#d8662d] shadow-md scale-105 rounded-xl";
+                    }
+
+                    return (
+                      <button
+                        key={seat.id}
+                        disabled={isOcupadoStatus || isSelling}
+                        onClick={() => handleSelectAsiento(seat)}
+                        className={`relative w-8 h-8 flex items-center justify-center transition-all focus:outline-none cursor-pointer ${colorClass}`}
+                      >
+                        <svg
+                          className="w-full h-full"
+                          viewBox="0 0 100 100"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            d="M 22 42 H 28 V 22 C 28 14, 72 14, 72 22 V 42 H 78 C 83 42, 85 46, 85 50 V 78 C 85 86, 77 88, 70 88 H 30 C 23 88, 15 86, 15 78 V 50 C 15 46, 17 42, 22 42 Z"
+                            stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"
+                          />
+                          <path
+                            d="M 28 42 V 66 C 28 74, 72 74, 72 66 V 42"
+                            stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"
+                          />
+                          {isOcupadoStatus ? (
+                            <path d="M 40 22 L 60 42 M 60 22 L 40 42" stroke="currentColor" strokeWidth="6" strokeLinecap="round" />
+                          ) : (
+                            <text x="50" y="34" textAnchor="middle" dominantBaseline="middle" className="font-bold text-[20px]" fill="currentColor">
+                              {seat.numero_asiento}
+                            </text>
+                          )}
+                        </svg>
+                      </button>
+                    );
+                  };
+
+                  const renderPiso1DoblePiso = () => {
+                    const filasPiso1 = [
+                      { col1: 1, col2: 2, col4: 3, hasTV: true },
+                      { col1: 4, col2: 5, col4: 6, hasTV: false },
+                      { col1: 7, col2: 8, col4: 9, hasTV: false },
+                      { col1: 10, col2: 11, col4: 12, hasTV: false },
+                    ];
+                    return (
+                      <div className="space-y-0.5">
+                        {filasPiso1.map((fila, idx) => {
+                          const seatCol1 = asientosPiso.find(s => s.numero_asiento === fila.col1);
+                          const seatCol2 = asientosPiso.find(s => s.numero_asiento === fila.col2);
+                          const seatCol4 = asientosPiso.find(s => s.numero_asiento === fila.col4);
+                          return (
+                            <div key={idx} className="flex items-center justify-center gap-0.5">
+                              {seatCol1 ? renderAsientoButton(seatCol1, true) : <div className="w-8 h-8" />}
+                              {seatCol2 ? renderAsientoButton(seatCol2, true) : <div className="w-8 h-8" />}
+                              <div className="w-4 flex items-center justify-center">{fila.hasTV && renderTVIcon()}</div>
+                              {seatCol4 ? renderAsientoButton(seatCol4, true) : <div className="w-8 h-8" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  };
+
+                  const renderPiso2DoblePiso = () => {
+                    type Fila2 = { col1: number; col2: number; col4: number | null; col5: number | null; hasTV: boolean; escalera: boolean };
+                    const filasPiso2: Fila2[] = [
+                      { col1: 13, col2: 14, col4: 15, col5: 16, hasTV: true, escalera: false },
+                      { col1: 17, col2: 18, col4: 19, col5: 20, hasTV: false, escalera: false },
+                      { col1: 21, col2: 22, col4: null, col5: null, hasTV: false, escalera: true },
+                      { col1: 23, col2: 24, col4: null, col5: null, hasTV: false, escalera: false },
+                      { col1: 25, col2: 26, col4: 27, col5: 28, hasTV: true, escalera: false },
+                      { col1: 29, col2: 30, col4: 31, col5: 32, hasTV: true, escalera: false },
+                      { col1: 33, col2: 34, col4: 35, col5: 36, hasTV: false, escalera: false },
+                      { col1: 37, col2: 38, col4: 39, col5: 40, hasTV: false, escalera: false },
+                      { col1: 41, col2: 42, col4: 43, col5: 44, hasTV: false, escalera: false },
+                      { col1: 45, col2: 46, col4: 47, col5: 48, hasTV: false, escalera: false },
+                      { col1: 49, col2: 50, col4: 51, col5: 52, hasTV: true, escalera: false },
+                      { col1: 53, col2: 54, col4: 55, col5: 56, hasTV: false, escalera: false },
+                      { col1: 57, col2: 58, col4: 59, col5: 60, hasTV: false, escalera: false },
+                    ];
+                    return (
+                      <div className="space-y-0.5">
+                        {filasPiso2.map((fila, idx) => {
+                          const seatCol1 = asientosPiso.find(s => s.numero_asiento === fila.col1);
+                          const seatCol2 = asientosPiso.find(s => s.numero_asiento === fila.col2);
+                          const seatCol4 = fila.col4 !== null ? asientosPiso.find(s => s.numero_asiento === fila.col4) : null;
+                          const seatCol5 = fila.col5 !== null ? asientosPiso.find(s => s.numero_asiento === fila.col5) : null;
+                          return (
+                            <div key={idx} className="flex items-center justify-center gap-0.5">
+                              {seatCol1 ? renderAsientoButton(seatCol1, false) : <div className="w-8 h-8" />}
+                              {seatCol2 ? renderAsientoButton(seatCol2, false) : <div className="w-8 h-8" />}
+                              <div className="w-4 flex items-center justify-center">{fila.hasTV && renderTVIcon()}</div>
+                              {fila.escalera ? (
+                                <div className="w-16 h-8 flex items-center justify-center">
+                                  <svg className="w-6 h-6 text-gray-400 opacity-60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M2 20h4v-5h4v-5h4v-5h6" />
+                                  </svg>
+                                </div>
+                              ) : (
+                                <>
+                                  {seatCol4 ? renderAsientoButton(seatCol4, false) : <div className="w-8 h-8" />}
+                                  {seatCol5 ? renderAsientoButton(seatCol5, false) : <div className="w-8 h-8" />}
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  };
+
+                  const renderAsientosRegulares = () => {
+                    const filas: any[][] = [];
+                    for (let i = 0; i < asientosPiso.length; i += 4) {
+                      filas.push(asientosPiso.slice(i, i + 4));
+                    }
+                    return (
+                      <div className="space-y-2">
+                        {filas.map((fila, filaIdx) => (
+                          <div key={filaIdx} className="flex items-center justify-center gap-2">
+                            {fila[0] ? renderAsientoButton(fila[0], true) : <div className="w-8 h-8" />}
+                            {fila[1] ? renderAsientoButton(fila[1], true) : <div className="w-8 h-8" />}
+                            <div className="w-4 h-8" />
+                            {fila[2] ? renderAsientoButton(fila[2], true) : <div className="w-8 h-8" />}
+                            {fila[3] ? renderAsientoButton(fila[3], true) : <div className="w-8 h-8" />}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  };
 
                   return (
-                    <div key={piso} className="bg-white p-6 rounded-[2rem] shadow-inner border border-gray-200">
-                      <div className="flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
+                    <div key={piso} className="bg-white p-6 rounded-[2rem] shadow-inner border border-gray-200 w-full flex flex-col items-center">
+                      <div className="w-full flex justify-between items-center mb-6 pb-4 border-b border-gray-100">
                         <div className="font-black text-gray-300 text-2xl uppercase tracking-widest">
                           Piso {piso}
                         </div>
                         {piso === 1 && (
-                          <div className="text-gray-300 flex flex-col items-center" title="Cabina del Conductor">
-                            <svg className="w-12 h-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                              {/* Volante de Bus */}
+                          <div className="text-gray-300 p-1 flex justify-center items-center">
+                            <svg className="w-8 h-8 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
                               <circle cx="12" cy="12" r="10" />
                               <circle cx="12" cy="12" r="3" />
                               <path d="M12 15l-3.5 6" />
@@ -319,50 +467,17 @@ export default function PasajesClient({ initialSucursales }: { initialSucursales
                         )}
                         {piso === 2 && (
                           <div className="text-gray-300">
-                            {/* Escaleras */}
-                            <svg className="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M3 21h18M3 17h14M3 13h10M3 9h6M3 5h2" strokeLinecap="round" />
                             </svg>
                           </div>
                         )}
                       </div>
-                      <div className="grid grid-cols-4 gap-4">
-                        {asientosPiso.map(asiento => {
-                          let bgColor = "bg-white border-green-500 border-b-[6px] text-green-700 hover:bg-green-50";
-                          let iconColor = "text-green-500";
-                          
-                          if (asiento.estado === "ocupado") {
-                            bgColor = "bg-gray-100 border-gray-300 border-b-[6px] text-gray-400 cursor-not-allowed opacity-80";
-                            iconColor = "text-gray-300";
-                          }
-                          if (asiento.estado === "inactivo") {
-                            bgColor = "bg-red-50 border-red-300 border-b-[6px] text-red-400 cursor-not-allowed";
-                            iconColor = "text-red-300";
-                          }
-
-                          const isSelected = selectedAsiento?.id === asiento.id;
-                          if (isSelected) {
-                            bgColor = "bg-gray-900 border-gray-900 border-b-[6px] text-white shadow-xl scale-110";
-                            iconColor = "text-white";
-                          }
-
-                          return (
-                            <button
-                              key={asiento.id}
-                              onClick={() => handleSelectAsiento(asiento)}
-                              disabled={asiento.estado !== "disponible"}
-                              className={`
-                                relative w-full h-16 rounded-t-3xl rounded-b-lg flex flex-col items-center justify-center transition-all
-                                ${bgColor}
-                              `}
-                            >
-                              <svg className={`w-6 h-6 mb-1 ${iconColor}`} viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M4 18v3h2v-3h12v3h2v-3H4zm15-8h-1V6c0-2.21-1.79-4-4-4H10c-2.21 0-4 1.79-4 4v4H5c-1.1 0-2 .9-2 2v4h18v-4c0-1.1-.9-2-2-2zm-3 0H8V6c0-1.1.9-2 2-2h4c1.1 0 2 .9 2 2v4z"/>
-                              </svg>
-                              <span className="text-sm font-black leading-none">{asiento.numero_asiento}</span>
-                            </button>
-                          );
-                        })}
+                      <div className="w-full overflow-x-auto flex justify-center py-2">
+                        {isBuscama 
+                          ? (piso === 1 ? renderPiso1DoblePiso() : renderPiso2DoblePiso())
+                          : renderAsientosRegulares()
+                        }
                       </div>
                     </div>
                   );

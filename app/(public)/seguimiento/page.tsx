@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { buscarEncomiendasPorDNI } from "@/app/actions";
 import { Search, Package, MapPin, Calendar, CheckCircle, Clock, Truck, Loader2, ArrowRight } from "lucide-react";
@@ -13,6 +13,22 @@ export default function SeguimientoPage() {
   const [encomiendas, setEncomiendas] = useState<any[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
   const [activeTab, setActiveTab] = useState<"en_curso" | "historial">("en_curso");
+  useEffect(() => {
+    const userDni = (session?.user as any)?.dni;
+    if (userDni && !hasSearched) {
+      setDni(userDni);
+      setUseRegisteredDni(true);
+      // Realizar la búsqueda automáticamente
+      setLoading(true);
+      setHasSearched(true);
+      buscarEncomiendasPorDNI(userDni)
+        .then(resultados => {
+          setEncomiendas(resultados);
+        })
+        .catch(console.error)
+        .finally(() => setLoading(false));
+    }
+  }, [session, hasSearched]);
 
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const isChecked = e.target.checked;

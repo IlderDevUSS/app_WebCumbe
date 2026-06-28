@@ -56,7 +56,6 @@ export async function limpiarBloqueosExpirados() {
       data: {
         estado: "disponible",
         bloqueado_por_usuario_id: null,
-        bloqueado_por_token: null,
         bloqueado_en: null,
       } as any,
     });
@@ -71,19 +70,26 @@ export async function buscarEncomiendasPorDNI(dni: string) {
   try {
     const encomiendas = await prisma.encomienda.findMany({
       where: {
-        remitente_dni: dni,
+        remitente: { dni: dni },
       },
       include: {
         origen: true,
         destino: true,
         viaje: true,
+        destinatario: true,
       },
       orderBy: {
         created_at: "desc",
       },
     });
 
-    return serializeBigInt(encomiendas);
+    // Mapear el nombre del destinatario para la vista pública
+    const encomiendasMapeadas = encomiendas.map(enc => ({
+      ...enc,
+      destinatario_nombre: enc.destinatario ? `${enc.destinatario.nombres} ${enc.destinatario.apellidos}` : "Desconocido"
+    }));
+
+    return serializeBigInt(encomiendasMapeadas);
   } catch (error) {
     console.error("Error buscando encomiendas:", error);
     return [];
@@ -254,7 +260,7 @@ export async function simularPagoYCrearTicket(
     
     // Si proveen email (tienen sesión activa o intentaron vincular), buscamos el cliente
     if (email) {
-      const user = await prisma.cliente.findUnique({ where: { correo: email } });
+      const user = await prisma.usuario.findUnique({ where: { correo: email } });
       if (user) {
         userId = user.id;
       }
@@ -274,14 +280,24 @@ export async function simularPagoYCrearTicket(
         data: { estado: "vendido", bloqueado_por_usuario_id: userId },
       });
 
+      const persona = await tx.persona.upsert({
+        where: { dni: pasajeroData.dni },
+        create: {
+          nombres: pasajeroData.nombres.toUpperCase(),
+          apellidos: pasajeroData.apellidos.toUpperCase(),
+          dni: pasajeroData.dni,
+          telefono: pasajeroData.telefono || null,
+        },
+        update: {
+          telefono: pasajeroData.telefono || undefined,
+        }
+      });
+
       const ticket = await tx.pasaje.create({
         data: {
           asiento_viaje_id: BigInt(tripSeatId),
-          nombres: pasajeroData.nombres,
-          apellidos: pasajeroData.apellidos,
-          dni: pasajeroData.dni,
-          telefono: pasajeroData.telefono || null,
-          usuario_id: userId,
+          persona_id: persona.id,
+          comprador_id: userId,
           precio: parseFloat(price),
           codigo_qr: `QR-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Date.now()}`,
         },
@@ -300,39 +316,60 @@ export async function simularPagoYCrearTicket(
 // 6. getClienteProfile
 export async function getClienteProfile(email: string) {
   try {
-    const cliente = await prisma.cliente.findUnique({
+    const usuario = await prisma.usuario.findUnique({
       where: { correo: email },
       include: {
-        pasajes: {
-          include: {
-            asiento_viaje: {
-              include: {
-                viaje: {
-                  include: {
-                    ruta: {
-                      include: {
-                        origen: true,
-                        destino: true,
-                      },
-                    },
-                    bus: true,
-                  },
-                },
-              },
-            },
-          },
-          orderBy: {
-            fecha_compra: "desc",
-          },
-        },
+        persona: true,
       },
     });
 
-    if (!cliente) {
+    if (!usuario) {
       throw new Error("Cliente no encontrado");
     }
 
-    return serializeBigInt(cliente);
+    // Buscar pasajes donde el usuario es el comprador O el pasajero
+    const pasajesBrutos = await prisma.pasaje.findMany({
+      where: {
+        OR: [
+          { comprador_id: usuario.id },
+          { persona_id: usuario.persona_id },
+        ],
+      },
+      include: {
+        pasajero: true,
+        asiento_viaje: {
+          include: {
+            viaje: {
+              include: {
+                ruta: {
+                  include: {
+                    origen: true,
+                    destino: true,
+                  },
+                },
+                bus: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        fecha_compra: "desc",
+      },
+    });
+
+    // Mapear los pasajes para mantener compatibilidad con el frontend que espera nombres, apellidos y dni en la raíz del ticket
+    const pasajesMapeados = pasajesBrutos.map((pasaje) => ({
+      ...pasaje,
+      nombres: pasaje.pasajero.nombres,
+      apellidos: pasaje.pasajero.apellidos,
+      dni: pasaje.pasajero.dni,
+    }));
+
+    return serializeBigInt({
+      ...usuario,
+      pasajes: pasajesMapeados,
+    });
   } catch (error) {
     console.error("Error al obtener perfil de cliente:", error);
     return null;
@@ -342,22 +379,35 @@ export async function getClienteProfile(email: string) {
 // 7. updateClienteProfile
 export async function updateClienteProfile(
   email: string,
-  data: { nombre: string; dni?: string; telefono?: string; fecha_nacimiento?: string }
+  data: { nombre: string; dni?: string; telefono?: string; newPassword?: string }
 ) {
   try {
-    const parsedDate = data.fecha_nacimiento ? new Date(data.fecha_nacimiento) : null;
+    const usuario = await prisma.usuario.findUnique({ where: { correo: email } });
+    if (!usuario) throw new Error("Usuario no encontrado");
 
-    const clienteActualizado = await prisma.cliente.update({
-      where: { correo: email },
+    const partes = data.nombre.trim().split(" ");
+    const nombres = partes[0] || "";
+    const apellidos = partes.length > 1 ? partes.slice(1).join(" ") : ".";
+
+    const personaActualizada = await prisma.persona.update({
+      where: { id: usuario.persona_id },
       data: {
-        nombre: data.nombre,
-        dni: data.dni || null,
+        nombres: nombres,
+        apellidos: apellidos,
+        dni: data.dni || undefined,
         telefono: data.telefono || null,
-        fecha_nacimiento: parsedDate,
       },
     });
 
-    return { success: true, user: serializeBigInt(clienteActualizado) };
+    if (data.newPassword && data.newPassword.trim().length >= 6) {
+      const hashedPassword = await bcrypt.hash(data.newPassword, 10);
+      await prisma.usuario.update({
+        where: { id: usuario.id },
+        data: { contrasena: hashedPassword },
+      });
+    }
+
+    return { success: true, user: serializeBigInt({ ...usuario, persona: personaActualizada }) };
   } catch (error: any) {
     console.error("Error al actualizar perfil de cliente:", error);
     let errorMessage = "Ocurrió un error inesperado al guardar los datos.";
@@ -400,7 +450,7 @@ export async function getAdminDashboardStats() {
     const busesCount = await prisma.bus.count();
 
     const hace24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const nuevosClientesCount = await prisma.cliente.count({
+    const nuevosClientesCount = await prisma.persona.count({
       where: {
         created_at: {
           gte: hace24h,
@@ -414,7 +464,8 @@ export async function getAdminDashboardStats() {
         fecha_compra: "desc",
       },
       include: {
-        cliente: true,
+        pasajero: true,
+        comprador: true,
         asiento_viaje: {
           include: {
             viaje: {
@@ -572,33 +623,55 @@ export async function createEncomienda(data: {
   viaje_id?: string;
 }) {
   try {
-    let codigo = "";
-    let esUnico = false;
+    const result = await prisma.$transaction(async (tx) => {
+      let codigo = "";
+      let esUnico = false;
 
-    while (!esUnico) {
-      codigo = `ENT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-      const existe = await prisma.encomienda.findUnique({ where: { codigo_seguimiento: codigo } });
-      if (!existe) esUnico = true;
-    }
+      while (!esUnico) {
+        codigo = `ENT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        const existe = await tx.encomienda.findUnique({ where: { codigo_seguimiento: codigo } });
+        if (!existe) esUnico = true;
+      }
 
-    const nuevaEncomienda = await prisma.encomienda.create({
-      data: {
-        codigo_seguimiento: codigo,
-        remitente_nombre: data.remitente_nombre,
-        remitente_dni: data.remitente_dni,
-        destinatario_nombre: data.destinatario_nombre,
-        destinatario_dni: data.destinatario_dni,
-        origen_id: BigInt(data.origen_id),
-        destino_id: BigInt(data.destino_id),
-        peso_kg: data.peso_kg,
-        descripcion: data.descripcion || null,
-        precio: data.precio,
-        viaje_id: data.viaje_id ? BigInt(data.viaje_id) : null,
-        estado: "recepcionado",
-      },
+      const getNames = (fullName: string) => {
+        const parts = fullName.trim().split(/\s+/);
+        const nombres = parts.slice(0, Math.ceil(parts.length / 2)).join(" ");
+        const apellidos = parts.slice(Math.ceil(parts.length / 2)).join(" ") || "-";
+        return { nombres, apellidos };
+      };
+
+      const remNames = getNames(data.remitente_nombre);
+      const remitente = await tx.persona.upsert({
+        where: { dni: data.remitente_dni },
+        create: { nombres: remNames.nombres, apellidos: remNames.apellidos, dni: data.remitente_dni },
+        update: {},
+      });
+
+      const destNames = getNames(data.destinatario_nombre);
+      const destinatario = await tx.persona.upsert({
+        where: { dni: data.destinatario_dni },
+        create: { nombres: destNames.nombres, apellidos: destNames.apellidos, dni: data.destinatario_dni },
+        update: {},
+      });
+
+      const nuevaEncomienda = await tx.encomienda.create({
+        data: {
+          codigo_seguimiento: codigo,
+          remitente_id: remitente.id,
+          destinatario_id: destinatario.id,
+          origen_id: BigInt(data.origen_id),
+          destino_id: BigInt(data.destino_id),
+          peso_kg: data.peso_kg,
+          descripcion: data.descripcion || null,
+          precio: data.precio,
+          viaje_id: data.viaje_id ? BigInt(data.viaje_id) : null,
+          estado: "recepcionado",
+        },
+      });
+      return nuevaEncomienda;
     });
 
-    return { success: true, encomienda: serializeBigInt(nuevaEncomienda) };
+    return { success: true, encomienda: serializeBigInt(result) };
   } catch (error: any) {
     console.error("Error al registrar encomienda:", error);
     return { success: false, error: error.message || "Error al registrar la encomienda." };
@@ -624,7 +697,8 @@ export async function getAdminPasajes() {
   try {
     const pasajes = await prisma.pasaje.findMany({
       include: {
-        cliente: true,
+        pasajero: true,
+        comprador: true,
         asiento_viaje: {
           include: {
             viaje: {
@@ -660,28 +734,9 @@ export async function venderPasajePresencial(
   precio: number
 ) {
   try {
-    let cliente = await prisma.cliente.findUnique({
-      where: { dni: clienteDni },
-    });
-
-    if (!cliente) {
-      const emailDummy = `dni_${clienteDni}_${Math.random().toString(36).substring(2, 6)}@cliente.elcumbe.com`;
-      const salt = await bcrypt.genSalt(10);
-      const hashPassword = await bcrypt.hash("cumbe12345", salt);
-
-      cliente = await prisma.cliente.create({
-        data: {
-          nombre: clienteNombre,
-          correo: emailDummy,
-          dni: clienteDni,
-          contrasena: hashPassword,
-          telefono: null,
-          fecha_nacimiento: null,
-        },
-      });
-    }
-
-    const userId = cliente.id;
+    const nameParts = clienteNombre.trim().split(/\s+/);
+    const nombres = nameParts.slice(0, Math.ceil(nameParts.length / 2)).join(" ");
+    const apellidos = nameParts.slice(Math.ceil(nameParts.length / 2)).join(" ") || "-";
 
     const result = await prisma.$transaction(async (tx) => {
       const seat = await tx.asientoViaje.findUnique({
@@ -694,20 +749,24 @@ export async function venderPasajePresencial(
 
       await tx.asientoViaje.update({
         where: { id: BigInt(asientoViajeId) },
-        data: { estado: "vendido", bloqueado_por_usuario_id: userId },
+        data: { estado: "vendido" },
       });
 
-      const nameParts = clienteNombre.trim().split(/\s+/);
-      const nombres = nameParts.slice(0, Math.ceil(nameParts.length / 2)).join(" ");
-      const apellidos = nameParts.slice(Math.ceil(nameParts.length / 2)).join(" ") || "-";
+      const persona = await tx.persona.upsert({
+        where: { dni: clienteDni },
+        create: {
+          nombres: nombres,
+          apellidos: apellidos,
+          dni: clienteDni,
+        },
+        update: {},
+      });
 
       const pasaje = await tx.pasaje.create({
         data: {
           asiento_viaje_id: BigInt(asientoViajeId),
-          usuario_id: userId as any,
-          nombres: nombres,
-          apellidos: apellidos,
-          dni: clienteDni,
+          persona_id: persona.id,
+          comprador_id: null,
           precio: precio,
           codigo_qr: `QR-PRES-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Date.now()}`,
         },
@@ -1196,7 +1255,7 @@ export async function procesarPagoMultiplesAsientosCulqi(
 
     let userId: bigint | null = null;
     if (email) {
-      const user = await prisma.cliente.findUnique({ where: { correo: email } });
+      const user = await prisma.usuario.findUnique({ where: { correo: email } });
       if (user) {
         userId = user.id;
       }
@@ -1224,24 +1283,38 @@ export async function procesarPagoMultiplesAsientosCulqi(
           data: {
             estado: "vendido",
             bloqueado_por_usuario_id: userId,
-            bloqueado_por_token: null,
-          } as any,
+          },
+        });
+
+        const persona = await tx.persona.upsert({
+          where: { dni: item.pasajeroData.dni },
+          create: {
+            nombres: item.pasajeroData.nombres.toUpperCase(),
+            apellidos: item.pasajeroData.apellidos.toUpperCase(),
+            dni: item.pasajeroData.dni,
+            telefono: item.pasajeroData.telefono || null,
+          },
+          update: {
+            telefono: item.pasajeroData.telefono || undefined,
+          }
         });
 
         // 3. Crear el ticket/pasaje para el pasajero específico
         const ticket = await tx.pasaje.create({
           data: {
             asiento_viaje_id: BigInt(item.seatId),
-            nombres: item.pasajeroData.nombres,
-            apellidos: item.pasajeroData.apellidos,
-            dni: item.pasajeroData.dni,
-            telefono: item.pasajeroData.telefono || null,
-            usuario_id: userId,
+            persona_id: persona.id,
+            comprador_id: userId,
             precio: paymentAmountPerSeat,
             codigo_qr: `QR-${Math.random().toString(36).substring(2, 10).toUpperCase()}-${Date.now()}`,
           },
         });
-        tickets.push(ticket);
+        tickets.push({
+          ...ticket,
+          nombres: persona.nombres,
+          apellidos: persona.apellidos,
+          dni: persona.dni
+        });
       }
 
       return tickets;
@@ -1264,7 +1337,7 @@ export async function marcarAsientosPendientes(seatIds: string[], guestToken: st
     
     let userId: bigint | null = null;
     if (email) {
-      const user = await prisma.cliente.findUnique({ where: { correo: email } });
+      const user = await prisma.usuario.findUnique({ where: { correo: email } });
       if (user) {
         userId = user.id;
       }
@@ -1275,7 +1348,7 @@ export async function marcarAsientosPendientes(seatIds: string[], guestToken: st
       // Si piden un asiento que ya tienen bloqueado (por ejemplo desde otra pestaña), lanzará error.
       const releaseCondition: any = userId 
         ? { bloqueado_por_usuario_id: userId, estado: "pendiente" } 
-        : { bloqueado_por_token: guestToken, estado: "pendiente" };
+        : { estado: "pendiente" };
 
       await tx.asientoViaje.updateMany({
         where: {
@@ -1285,7 +1358,6 @@ export async function marcarAsientosPendientes(seatIds: string[], guestToken: st
         data: {
           estado: "disponible",
           bloqueado_por_usuario_id: null,
-          bloqueado_por_token: null,
           bloqueado_en: null,
         } as any,
       });
@@ -1314,7 +1386,6 @@ export async function marcarAsientosPendientes(seatIds: string[], guestToken: st
         data: {
           estado: "pendiente",
           bloqueado_por_usuario_id: userId,
-          bloqueado_por_token: guestToken,
           bloqueado_en: new Date(),
         } as any,
       });

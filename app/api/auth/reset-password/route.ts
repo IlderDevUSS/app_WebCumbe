@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const user = await prisma.cliente.findUnique({
+    const user = await prisma.usuario.findUnique({
       where: { correo: email },
     });
 
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
     // Run updates in a transaction
     await prisma.$transaction([
-      prisma.cliente.update({
+      prisma.usuario.update({
         where: { id: user.id },
         data: { contrasena: hashedPassword },
       }),

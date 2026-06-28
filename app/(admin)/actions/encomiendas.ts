@@ -28,12 +28,23 @@ export async function obtenerEncomiendas() {
             id: true,
             bus: { select: { placa: true } }
           }
-        }
+        },
+        remitente: true,
+        destinatario: true,
       },
       orderBy: { created_at: "desc" },
     });
     
-    return { success: true, data: serializeBigInt(encomiendas) };
+    // Mapear campos para compatibilidad con la vista de cliente
+    const encomiendasMapeadas = encomiendas.map(enc => ({
+      ...enc,
+      remitente_nombre: enc.remitente ? `${enc.remitente.nombres} ${enc.remitente.apellidos}` : "Desconocido",
+      remitente_dni: enc.remitente?.dni || "N/A",
+      destinatario_nombre: enc.destinatario ? `${enc.destinatario.nombres} ${enc.destinatario.apellidos}` : "Desconocido",
+      destinatario_dni: enc.destinatario?.dni || "N/A",
+    }));
+
+    return { success: true, data: serializeBigInt(encomiendasMapeadas) };
   } catch (error) {
     console.error("Error al obtener encomiendas:", error);
     return { success: false, error: "Error al obtener encomiendas" };

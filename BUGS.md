@@ -135,3 +135,14 @@
 - **Solución:**
   1. Se agregaron los campos `asientos_piso_1 (Int?)`, `asientos_restringidos (String? @db.Text)` e `imagenes (String? @db.Text)` al modelo `Bus` en `schema.prisma`.
   2. Se ejecutó `npx prisma db push` para sincronizar la base de datos.
+
+## 14. [2026-06-27] Errores TypeScript en compra y recuperación de contraseña por esquema antiguo
+- **Problema:** Tras la actualización a la nueva arquitectura basada en `Persona`, el servidor lanzó múltiples errores en `app/actions.ts` y las rutas de autenticación. Errores como "Property 'cliente' does not exist" o "Unknown argument 'bloqueado_por_token'" surgieron debido a que el código seguía referenciando al modelo `cliente` deprecado y a campos removidos en `AsientoViaje`.
+- **Solución:**
+  1. Se reemplazaron todas las llamadas a `prisma.cliente` por `prisma.usuario` en el proceso de simulación de pago, recuperación de contraseña y obtención del perfil.
+  2. En la creación de pasajes, se implementó la lógica correcta haciendo primero un `prisma.persona.upsert()` antes de asociar el `persona_id` a `Pasaje`.
+  3. Se removió el campo `bloqueado_por_token` de los argumentos de `AsientoViaje` ya que no es parte del nuevo esquema.
+
+## 15. [2026-06-27] Los tickets del usuario no aparecían en el Perfil
+- **Problema:** Tras la migración al esquema de `Persona`, la función `getClienteProfile` solo estaba consultando los pasajes asignados directamente al `persona_id` asociado a la cuenta. Esto provocaba que los pasajes comprados por el usuario (donde él es el `comprador_id` pero quizás compró para otro pasajero) no se mostraran en su lista de "Mis Pasajes". Además, el frontend esperaba los campos de nombre y apellido directamente en el objeto del pasaje.
+- **Solución:** Se modificó la consulta en `app/actions.ts` para buscar los pasajes donde el usuario sea el `comprador_id` OR su respectivo `persona_id`. Adicionalmente, se mapearon los datos del `pasajero` (`nombres`, `apellidos`, `dni`) directamente en el objeto principal del pasaje devuelto para mantener total retrocompatibilidad con el frontend.
