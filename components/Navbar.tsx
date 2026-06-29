@@ -38,34 +38,39 @@ export default function Navbar() {
           {/* Logo and Brand */}
           <div className="flex items-center">
             <Link href="/" className="flex flex-shrink-0 items-center gap-2">
-              <img src="/logo.png" alt="Logo" width={200} height={250} />
+              <img src="/logo.png" alt="Logo" className="h-9 md:h-11 w-auto object-contain" />
             </Link>
           </div>
 
           {/* Desktop Nav Links */}
-          <div className="hidden md:flex md:items-center md:space-x-8">
-            <Link href="/" className="text-gray-600 hover:text-[#f07639] transition-colors px-3 py-2 text-sm font-medium">Inicio</Link>
-            <Link href="/seguimiento" className="text-gray-600 hover:text-[#f07639] transition-colors px-3 py-2 text-sm font-medium">Revisar Encomienda</Link>
-            <Link href="/quienes-somos" className="text-gray-600 hover:text-[#f07639] transition-colors px-3 py-2 text-sm font-medium">¿Quiénes Somos?</Link>
-            <Link href="/ayuda" className="text-gray-600 hover:text-[#f07639] transition-colors px-3 py-2 text-sm font-medium">Ayuda / FAQs</Link>
-            <Link href="/compra" className="text-gray-600 hover:text-[#f07639] transition-colors px-3 py-2 text-sm font-medium">Compra tu pasaje</Link>
+          <div className="hidden md:flex md:items-center space-x-1 lg:space-x-3">
+            <Link href="/" className="text-gray-600 hover:text-[#f07639] transition-colors px-2 py-1.5 text-xs lg:text-sm font-semibold">Inicio</Link>
+            <Link href="/seguimiento" className="text-gray-600 hover:text-[#f07639] transition-colors px-2 py-1.5 text-xs lg:text-sm font-semibold whitespace-nowrap">Revisar Encomienda</Link>
+            <Link href="/quienes-somos" className="text-gray-600 hover:text-[#f07639] transition-colors px-2 py-1.5 text-xs lg:text-sm font-semibold whitespace-nowrap">¿Quiénes Somos?</Link>
+            <Link href="/ayuda" className="text-gray-600 hover:text-[#f07639] transition-colors px-2 py-1.5 text-xs lg:text-sm font-semibold whitespace-nowrap">Ayuda / FAQs</Link>
+            <Link href="/compra" className="text-gray-600 hover:text-[#f07639] transition-colors px-2 py-1.5 text-xs lg:text-sm font-semibold whitespace-nowrap">Compra tu pasaje</Link>
           </div>
 
           {/* Desktop Right Side */}
-          <div className="hidden md:flex items-center space-x-4">
+          <div className="hidden md:flex items-center space-x-2 lg:space-x-4">
             {status === "loading" ? (
               <div className="h-8 w-24 bg-gray-200 animate-pulse rounded-md"></div>
             ) : session ? (
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  className="flex items-center gap-2 text-gray-700 hover:text-[#f07639] focus:outline-none transition-all duration-200"
+                  className="flex items-center gap-1.5 lg:gap-2 text-gray-700 hover:text-[#f07639] focus:outline-none transition-all duration-200 max-w-[180px] lg:max-w-[260px]"
                 >
-                  <div className="bg-gray-100 p-2 rounded-full hover:bg-orange-50 hover:text-[#f07639] transition-colors">
+                  <div className="bg-gray-100 p-2 rounded-full hover:bg-orange-50 hover:text-[#f07639] transition-colors flex-shrink-0">
                     <User className="h-5 w-5" />
                   </div>
-                  <span className="font-medium text-sm">{session.user?.name}</span>
-                  <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-[#f07639]' : ''}`} />
+                  <span 
+                    className="font-semibold text-xs lg:text-sm truncate max-w-[80px] lg:max-w-[140px] whitespace-nowrap"
+                    title={session.user?.name || ""}
+                  >
+                    {session.user?.name ? session.user.name.split(" ").slice(0, 2).join(" ") : ""}
+                  </span>
+                  <ChevronDown className={`h-4 w-4 flex-shrink-0 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180 text-[#f07639]' : ''}`} />
                 </button>
 
                 {/* Dropdown transition Wrapper */}
