@@ -10,36 +10,50 @@ export default withAuth(
 
     if (isAuthPage) {
       if (isAuth) {
-        if (token.role === "admin" || token.role === "operario" || token.role === "vendedor") {
+        if (token.role === "admin" || token.role === "vendedor") {
           return NextResponse.redirect(new URL("/admin", req.url));
+        } else if (token.role === "conductor") {
+          return NextResponse.redirect(new URL("/staff/conductor", req.url));
+        } else if (token.role === "operario") {
+          return NextResponse.redirect(new URL("/staff/operario", req.url));
         }
         return NextResponse.redirect(new URL("/", req.url));
       }
       return null;
     }
 
+    const isStaffRoute = req.nextUrl.pathname.startsWith("/staff");
+
     if (isAdminRoute) {
-      if (!isAuth) {
-        return NextResponse.redirect(new URL("/login", req.url));
-      }
-
+      if (!isAuth) return NextResponse.redirect(new URL("/login", req.url));
+      
       const pathname = req.nextUrl.pathname;
-
       if (token.role === "vendedor") {
         const rutasPermitidas = [
           "/admin/pasajes",
           "/admin/encomiendas",
           "/admin/viajes"
         ];
-        
-        // Permitimos exactamente "/admin" o cualquier ruta que empiece por alguna de las permitidas
         const isAllowed = pathname === "/admin" || rutasPermitidas.some(ruta => pathname.startsWith(ruta));
-        
         if (!isAllowed) {
           return NextResponse.redirect(new URL("/admin", req.url));
         }
-      } else if (token.role !== "admin" && token.role !== "operario") {
+      } else if (token.role !== "admin") {
         return NextResponse.redirect(new URL("/", req.url));
+      }
+    }
+
+    if (isStaffRoute) {
+      if (!isAuth || (token.role !== "conductor" && token.role !== "operario")) {
+        return NextResponse.redirect(new URL("/login", req.url));
+      }
+
+      const pathname = req.nextUrl.pathname;
+      if (token.role === "conductor" && !pathname.startsWith("/staff/conductor")) {
+        return NextResponse.redirect(new URL("/staff/conductor", req.url));
+      }
+      if (token.role === "operario" && !pathname.startsWith("/staff/operario")) {
+        return NextResponse.redirect(new URL("/staff/operario", req.url));
       }
     }
   },
@@ -51,5 +65,5 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/admin/:path*", "/login", "/registro"],
+  matcher: ["/admin/:path*", "/staff/:path*", "/login", "/registro"],
 };

@@ -31,6 +31,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Inicio", href: "/admin", icon: LayoutDashboard, roles: ["admin", "vendedor"] },
     { name: "Pasajes", href: "/admin/pasajes", icon: Ticket, roles: ["admin", "vendedor"] },
     { name: "Encomiendas", href: "/admin/encomiendas", icon: Package, roles: ["admin", "vendedor"] },
+    { name: "Mi Panel", href: "/admin/conductor", icon: LayoutDashboard, roles: ["conductor"] },
+    { name: "Mis Viajes", href: "/admin/conductor/viajes", icon: Bus, roles: ["conductor"] },
   ];
   
   const managementNav = [

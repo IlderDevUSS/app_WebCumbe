@@ -83,6 +83,10 @@ export default function Navbar() {
                       <Link href="/perfil" className="block px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-[#f07639] transition-colors" onClick={() => setIsDropdownOpen(false)}>Mi Perfil</Link>
                       <Link href="/perfil?tab=tickets" className="block px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-[#f07639] transition-colors" onClick={() => setIsDropdownOpen(false)}>Mis Pasajes</Link>
                     </>
+                  ) : session.user?.role === "conductor" ? (
+                    <Link href="/staff/conductor" className="block px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-[#f07639] transition-colors" onClick={() => setIsDropdownOpen(false)}>Panel de Conductor</Link>
+                  ) : session.user?.role === "operario" ? (
+                    <Link href="/staff/operario" className="block px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-[#f07639] transition-colors" onClick={() => setIsDropdownOpen(false)}>Panel de Operario</Link>
                   ) : (
                     <Link href="/admin" className="block px-4 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-[#f07639] transition-colors" onClick={() => setIsDropdownOpen(false)}>Panel Admin</Link>
                   )}
@@ -153,6 +157,10 @@ export default function Navbar() {
                       <Link href="/perfil" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50" onClick={() => setIsMobileMenuOpen(false)}>Mi Perfil</Link>
                       <Link href="/perfil?tab=tickets" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50" onClick={() => setIsMobileMenuOpen(false)}>Mis Pasajes</Link>
                     </>
+                  ) : session.user?.role === "conductor" ? (
+                    <Link href="/staff/conductor" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50" onClick={() => setIsMobileMenuOpen(false)}>Panel de Conductor</Link>
+                  ) : session.user?.role === "operario" ? (
+                    <Link href="/staff/operario" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50" onClick={() => setIsMobileMenuOpen(false)}>Panel de Operario</Link>
                   ) : (
                     <Link href="/admin" className="block px-3 py-2 rounded-md text-base font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-50" onClick={() => setIsMobileMenuOpen(false)}>Panel Admin</Link>
                   )}
