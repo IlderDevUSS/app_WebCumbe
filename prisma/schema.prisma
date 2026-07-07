@@ -25,6 +25,10 @@ model Persona {
   reclamos              Reclamo[]
   encomiendas_enviadas  Encomienda[] @relation("Remitente")
   encomiendas_recibidas Encomienda[] @relation("Destinatario")
+
+  viajes_como_conductor Viaje[]           @relation("Piloto")
+  gastos_registrados    GastoRuta[]
+  novedades_reportadas  NovedadMecanica[]
 }
 
 model Usuario {
@@ -72,7 +76,8 @@ model Bus {
   created_at            DateTime? @default(now()) @db.Timestamp(0)
   updated_at            DateTime? @default(now()) @db.Timestamp(0)
 
-  viajes Viaje[]
+  viajes    Viaje[]
+  novedades NovedadMecanica[]
 }
 
 model Ruta {
@@ -93,17 +98,22 @@ model Viaje {
   id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   ruta_id       BigInt    @db.UnsignedBigInt
   bus_id        BigInt    @db.UnsignedBigInt
+  conductor_id  BigInt?   @db.UnsignedBigInt
   fecha_salida  DateTime  @db.DateTime(0)
   fecha_llegada DateTime? @db.DateTime(0)
   estado        String    @default("programado")
   created_at    DateTime? @default(now()) @db.Timestamp(0)
   updated_at    DateTime? @default(now()) @db.Timestamp(0)
 
-  ruta           Ruta           @relation(fields: [ruta_id], references: [id], onDelete: Cascade)
-  bus            Bus            @relation(fields: [bus_id], references: [id], onDelete: Cascade)
+  ruta           Ruta              @relation(fields: [ruta_id], references: [id], onDelete: Cascade)
+  bus            Bus               @relation(fields: [bus_id], references: [id], onDelete: Cascade)
+  conductor      Persona?          @relation("Piloto", fields: [conductor_id], references: [id], onDelete: SetNull)
   asientos_viaje AsientoViaje[]
   encomiendas    Encomienda[]
   pagos          Pago[]
+  gastos         GastoRuta[]
+  novedades      NovedadMecanica[]
+  alertas        AlertaCentral[]
 }
 
 model AsientoViaje {
@@ -139,6 +149,7 @@ model Pasaje {
   precio       Decimal   @db.Decimal(8, 2)
   fecha_compra DateTime? @default(now()) @db.Timestamp(0)
   codigo_qr    String?   @unique @db.VarChar(255)
+  abordado     Boolean   @default(false)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
   updated_at   DateTime? @default(now()) @db.Timestamp(0)
 
@@ -237,4 +248,49 @@ model Pago {
   @@index([asiento_id], map: "pago_asiento_id_fkey")
   @@index([viaje_id], map: "pago_viaje_id_fkey")
   @@map("pago")
+}
+
+// ==========================================
+// 6. OPERACIONES Y CONDUCTOR
+// ==========================================
+
+model GastoRuta {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  viaje_id      BigInt    @db.UnsignedBigInt
+  conductor_id  BigInt    @db.UnsignedBigInt
+  concepto      String    @db.VarChar(100)
+  monto         Decimal   @db.Decimal(8, 2)
+  foto_url      String?   @db.Text
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  updated_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  viaje         Viaje     @relation(fields: [viaje_id], references: [id], onDelete: Cascade)
+  conductor     Persona   @relation(fields: [conductor_id], references: [id], onDelete: Cascade)
+}
+
+model NovedadMecanica {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  viaje_id      BigInt    @db.UnsignedBigInt
+  bus_id        BigInt    @db.UnsignedBigInt
+  conductor_id  BigInt    @db.UnsignedBigInt
+  categoria     String    @db.VarChar(100)
+  descripcion   String    @db.Text
+  estado        String    @default("pendiente")
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  updated_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  viaje         Viaje     @relation(fields: [viaje_id], references: [id], onDelete: Cascade)
+  bus           Bus       @relation(fields: [bus_id], references: [id], onDelete: Cascade)
+  conductor     Persona   @relation(fields: [conductor_id], references: [id], onDelete: Cascade)
+}
+
+model AlertaCentral {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  viaje_id      BigInt    @db.UnsignedBigInt
+  mensaje       String    @db.Text
+  leido         Boolean   @default(false)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  updated_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  viaje         Viaje     @relation(fields: [viaje_id], references: [id], onDelete: Cascade)
 }
