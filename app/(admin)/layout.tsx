@@ -16,6 +16,7 @@ import {
   MapPin,
   ChevronRight,
   MessageSquareWarning,
+  User,
 } from "lucide-react";
 import { useState } from "react";
 import NotificacionesDropdown from "./admin/NotificacionesDropdown";
@@ -24,6 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const { data: session } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
 
   const userRole = session?.user?.role || "cliente";
 
@@ -194,14 +196,48 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <NotificacionesDropdown />
             
             {/* User info */}
-            <div className="hidden sm:flex items-center gap-3 pl-4 border-l border-slate-100">
-              <div className="text-right">
-                <p className="text-[13px] font-bold text-slate-800 leading-tight">{session?.user?.name}</p>
-                <p className="text-[11px] text-slate-400 capitalize font-medium">{session?.user?.role}</p>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#f07639] to-[#d45a1f] flex items-center justify-center text-white font-black text-sm shadow-sm">
-                {session?.user?.name?.charAt(0) || "A"}
-              </div>
+            <div className="relative">
+              <button 
+                onClick={() => setUserDropdownOpen(!userDropdownOpen)}
+                className="hidden sm:flex items-center gap-3 pl-4 border-l border-slate-100 hover:opacity-85 transition-opacity outline-none text-left cursor-pointer"
+              >
+                <div className="text-right">
+                  <p className="text-[13px] font-bold text-slate-800 leading-tight">{session?.user?.name}</p>
+                  <p className="text-[11px] text-slate-400 capitalize font-medium">{session?.user?.role}</p>
+                </div>
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#f07639] to-[#d45a1f] flex items-center justify-center text-white font-black text-sm shadow-sm transition-transform active:scale-95">
+                  {session?.user?.name?.charAt(0) || "A"}
+                </div>
+              </button>
+
+              {userDropdownOpen && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setUserDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-2.5 w-48 bg-white border border-slate-100 rounded-2xl shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <Link 
+                      href="/perfil"
+                      onClick={() => setUserDropdownOpen(false)}
+                      className="flex items-center px-4 py-2.5 text-[13px] font-semibold text-slate-600 hover:bg-[#f07639]/5 hover:text-[#f07639] transition-colors"
+                    >
+                      <User className="w-4 h-4 mr-2.5" />
+                      Ver Perfil
+                    </Link>
+                    <button 
+                      onClick={() => {
+                        setUserDropdownOpen(false);
+                        signOut({ callbackUrl: "/login" });
+                      }}
+                      className="w-full flex items-center px-4 py-2.5 text-[13px] font-semibold text-red-500 hover:bg-red-50 transition-colors border-t border-slate-50 cursor-pointer text-left"
+                    >
+                      <LogOut className="w-4 h-4 mr-2.5" />
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </header>
