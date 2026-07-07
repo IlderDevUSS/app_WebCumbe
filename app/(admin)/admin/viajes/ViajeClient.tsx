@@ -1,13 +1,15 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, XCircle, Calendar, Hash, MapPin, Bus as BusIcon, Search } from "lucide-react";
-import { crearViajeConAsientos, cancelarViaje } from "../../actions/viajes";
+import { useState, useEffect } from "react";
+import { createPortal } from "react-dom";
+import { Plus, XCircle, Pencil, Calendar, Hash, MapPin, Bus as BusIcon, Search } from "lucide-react";
+import { crearViajeConAsientos, cancelarViaje, actualizarViaje } from "../../actions/viajes";
 
 type Ruta = {
   id: string;
   origen: { nombre: string };
   destino: { nombre: string };
+  duracion_estimada_minutos: number;
 };
 
 type Bus = {
@@ -21,6 +23,7 @@ type Viaje = {
   id: string;
   ruta_id: string;
   bus_id: string;
+  conductor_id?: string | null;
   fecha_salida: string;
   fecha_llegada: string | null;
   estado: string;
@@ -28,45 +31,87 @@ type Viaje = {
   bus: Bus;
 };
 
+type Conductor = {
+  id: string;
+  nombres: string;
+  apellidos: string;
+};
+
 export default function ViajeClient({ 
   initialViajes, 
   rutas, 
-  buses 
+  buses,
+  conductores
 }: { 
   initialViajes: Viaje[], 
   rutas: Ruta[], 
-  buses: Bus[] 
+  buses: Bus[],
+  conductores: Conductor[]
 }) {
   const [viajes, setViajes] = useState<Viaje[]>(initialViajes);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
   const [periodo, setPeriodo] = useState("actuales"); // "actuales" | "todos"
   const [estadoFiltro, setEstadoFiltro] = useState("todos"); // "todos" | "programado" | "en_ruta" | ...
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [editingViajeId, setEditingViajeId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
+
   const [formData, setFormData] = useState({
     ruta_id: "",
     bus_id: "",
-    fecha_salida: "",
-    fecha_llegada: "",
+    conductor_id: "",
   });
+  
+  const [fechaSalidaDate, setFechaSalidaDate] = useState("");
+  const [fechaSalidaTime, setFechaSalidaTime] = useState("");
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleOpenModal = () => {
+  const handleOpenForm = () => {
     setError(null);
     setFormData({
       ruta_id: rutas.length > 0 ? rutas[0].id : "",
       bus_id: buses.length > 0 ? buses[0].id : "",
-      fecha_salida: "",
-      fecha_llegada: "",
+      conductor_id: "",
     });
-    setIsModalOpen(true);
+    setFechaSalidaDate("");
+    setFechaSalidaTime("");
+    setEditingViajeId(null);
+    setIsFormOpen(true);
   };
 
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
+  const handleEditForm = (viaje: Viaje) => {
+    setError(null);
+    setFormData({
+      ruta_id: viaje.ruta_id,
+      bus_id: viaje.bus_id,
+      conductor_id: viaje.conductor_id || "",
+    });
+    
+    // Convertir la fecha UTC del servidor a local para los inputs de tipo date y time
+    const departure = new Date(viaje.fecha_salida);
+    const year = departure.getFullYear();
+    const month = String(departure.getMonth() + 1).padStart(2, '0');
+    const day = String(departure.getDate()).padStart(2, '0');
+    const hours = String(departure.getHours()).padStart(2, '0');
+    const minutes = String(departure.getMinutes()).padStart(2, '0');
+
+    setFechaSalidaDate(`${year}-${month}-${day}`);
+    setFechaSalidaTime(`${hours}:${minutes}`);
+    
+    setEditingViajeId(viaje.id);
+    setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setIsFormOpen(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -75,22 +120,52 @@ export default function ViajeClient({
     setError(null);
 
     try {
-      const res = await crearViajeConAsientos(formData);
-      if (res.success) {
-        // Obtenemos relaciones para UI
-        const rutaSel = rutas.find(r => r.id === formData.ruta_id)!;
-        const busSel = buses.find(b => b.id === formData.bus_id)!;
-        
-        const nuevoViaje = {
-          ...res.data,
-          ruta: rutaSel,
-          bus: busSel
-        };
+      if (!fechaSalidaDate || !fechaSalidaTime) {
+        setError("Debe especificar la fecha y hora de salida.");
+        setIsLoading(false);
+        return;
+      }
 
-        setViajes([nuevoViaje, ...viajes]);
-        handleCloseModal();
+      // Calcular automáticamente la hora de llegada en base a la duración de la ruta
+      const rutaSel = rutas.find(r => r.id.toString() === formData.ruta_id.toString());
+      const duration = rutaSel ? rutaSel.duracion_estimada_minutos : 0;
+      const departureDateTime = new Date(`${fechaSalidaDate}T${fechaSalidaTime}`);
+      const arrivalDateTime = new Date(departureDateTime.getTime() + duration * 60 * 1000);
+
+      const payload = {
+        ...formData,
+        fecha_salida: `${fechaSalidaDate}T${fechaSalidaTime}`,
+        fecha_llegada: arrivalDateTime.toISOString(),
+      };
+
+      if (editingViajeId) {
+        const res = await actualizarViaje(editingViajeId, payload);
+        if (res.success) {
+          setViajes((prev) =>
+            prev.map((v) => (v.id === editingViajeId ? res.data : v))
+          );
+          handleCloseForm();
+        } else {
+          setError(res.error || "Error al actualizar viaje");
+        }
       } else {
-        setError(res.error || "Error al programar viaje");
+        const res = await crearViajeConAsientos(payload);
+        if (res.success) {
+          // Obtenemos relaciones para UI
+          const rutaSel = rutas.find(r => r.id.toString() === formData.ruta_id.toString())!;
+          const busSel = buses.find(b => b.id.toString() === formData.bus_id.toString())!;
+          
+          const nuevoViaje = {
+            ...res.data,
+            ruta: rutaSel,
+            bus: busSel
+          };
+
+          setViajes([nuevoViaje, ...viajes]);
+          handleCloseForm();
+        } else {
+          setError(res.error || "Error al programar viaje");
+        }
       }
     } catch (err) {
       setError("Error inesperado de red.");
@@ -175,7 +250,7 @@ export default function ViajeClient({
           </div>
         </div>
         <button
-          onClick={handleOpenModal}
+          onClick={handleOpenForm}
           className="bg-gradient-to-r from-[#f07639] to-[#d45a1f] hover:from-[#e06528] hover:to-[#c7551d] text-white px-5 py-2.5 rounded-xl font-bold text-[13px] flex items-center shadow-lg shadow-[#f07639]/15 transition-all hover:-translate-y-0.5 hover:shadow-xl hover:shadow-[#f07639]/25"
         >
           <Plus className="w-4 h-4 mr-2" />
@@ -254,6 +329,7 @@ export default function ViajeClient({
               <tr className="bg-[#f8f9fc] border-b border-slate-100">
                 <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider">Ruta</th>
                 <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider">Salida</th>
+                <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider">Llegada</th>
                 <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider">Bus Asignado</th>
                 <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider text-center">Estado</th>
                 <th className="px-6 py-3.5 text-[11px] font-black text-slate-400 uppercase tracking-wider text-right">Acciones</th>
@@ -285,6 +361,17 @@ export default function ViajeClient({
                       </div>
                     </td>
                     <td className="px-6 py-4">
+                      <div className="flex items-center text-slate-600">
+                        <Calendar className="w-4 h-4 mr-2" />
+                        <span className="font-medium">
+                          {viaje.fecha_llegada ? new Date(viaje.fecha_llegada).toLocaleString('es-PE', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          }) : "-"}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="flex flex-col">
                         <div className="flex items-center font-bold text-slate-800">
                           <BusIcon className="w-4 h-4 mr-2 text-slate-400" />
@@ -300,20 +387,29 @@ export default function ViajeClient({
                     </td>
                     <td className="px-6 py-4 text-right">
                       {viaje.estado === 'programado' && (
-                        <button
-                          onClick={() => handleCancel(viaje.id)}
-                          className="text-slate-400 hover:text-red-500 transition-colors"
-                          title="Cancelar Viaje"
-                        >
-                          <XCircle className="w-6 h-6 inline-block" />
-                        </button>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => handleEditForm(viaje)}
+                            className="text-slate-400 hover:text-blue-500 transition-colors"
+                            title="Editar Viaje"
+                          >
+                            <Pencil className="w-5 h-5 inline-block" />
+                          </button>
+                          <button
+                            onClick={() => handleCancel(viaje.id)}
+                            className="text-slate-400 hover:text-red-500 transition-colors"
+                            title="Cancelar Viaje"
+                          >
+                            <XCircle className="w-5 h-5 inline-block" />
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={6} className="px-6 py-8 text-center text-slate-500">
                     No hay viajes programados.
                   </td>
                 </tr>
@@ -324,36 +420,37 @@ export default function ViajeClient({
       </div>
 
       {/* Modal Formulario */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 overflow-hidden border border-slate-100">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h3 className="text-lg font-bold text-slate-800">Programar Nuevo Viaje</h3>
-              <button
-                onClick={handleCloseModal}
-                className="text-slate-400 hover:text-slate-600 transition-colors text-2xl leading-none"
-              >
-                &times;
-              </button>
-            </div>
+      {mounted && isFormOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] overflow-y-auto bg-black/40 backdrop-blur-sm flex justify-center items-start py-8 px-4 sm:px-6">
+          <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-lg border border-slate-100 overflow-hidden relative my-auto p-8">
+            <button
+              onClick={handleCloseForm}
+              className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors text-2xl leading-none"
+            >
+              &times;
+            </button>
+
+            <h3 className="text-xl font-bold text-slate-800 mb-6">
+              {editingViajeId ? "Editar Viaje" : "Programar Nuevo Viaje"}
+            </h3>
             
-            <form onSubmit={handleSubmit} className="p-6">
+            <form onSubmit={handleSubmit} className="space-y-5">
               {error && (
-                <div className="mb-4 p-3 bg-red-50 text-red-750 border border-red-150 rounded-lg text-sm">
+                <div className="p-3 bg-red-50 text-red-700 border border-red-155 rounded-xl text-sm">
                   {error}
                 </div>
               )}
               
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     Ruta <span className="text-red-500">*</span>
                   </label>
                   <select
                     required
                     value={formData.ruta_id}
                     onChange={(e) => setFormData({ ...formData, ruta_id: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-slate-200 text-slate-750 focus:border-[#f07639]/40 rounded-xl outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-gray-200 text-gray-800 focus:border-[#f07639] focus:ring-1 focus:ring-[#f07639] rounded-xl outline-none transition-all text-sm"
                   >
                     <option value="" disabled>Seleccione ruta</option>
                     {rutas.map(r => (
@@ -365,14 +462,14 @@ export default function ViajeClient({
                 </div>
                 
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                  <label className="block text-sm font-medium text-gray-755 mb-1">
                     Bus Asignado <span className="text-red-500">*</span>
                   </label>
                   <select
                     required
                     value={formData.bus_id}
                     onChange={(e) => setFormData({ ...formData, bus_id: e.target.value })}
-                    className="w-full px-4 py-2 bg-white border border-slate-200 text-slate-750 focus:border-[#f07639]/40 rounded-xl outline-none transition-all"
+                    className="w-full px-4 py-2.5 bg-white border border-gray-200 text-gray-800 focus:border-[#f07639] focus:ring-1 focus:ring-[#f07639] rounded-xl outline-none transition-all text-sm"
                   >
                     <option value="" disabled>Seleccione bus</option>
                     {buses.map(b => (
@@ -383,59 +480,76 @@ export default function ViajeClient({
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Salida <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="datetime-local"
-                      required
-                      value={formData.fecha_salida}
-                      onChange={(e) => setFormData({ ...formData, fecha_salida: e.target.value })}
-                      className="w-full px-4 py-2 bg-white border border-slate-200 text-slate-750 focus:border-[#f07639]/40 rounded-xl outline-none transition-all cursor-pointer"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Llegada
-                    </label>
-                    <input
-                      type="datetime-local"
-                      value={formData.fecha_llegada}
-                      onChange={(e) => setFormData({ ...formData, fecha_llegada: e.target.value })}
-                      className="w-full px-4 py-2 bg-white border border-slate-200 text-slate-750 focus:border-[#f07639]/40 rounded-xl outline-none transition-all cursor-pointer"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-755 mb-1">
+                    Conductor Asignado
+                  </label>
+                  <select
+                    value={formData.conductor_id}
+                    onChange={(e) => setFormData({ ...formData, conductor_id: e.target.value })}
+                    className="w-full px-4 py-2.5 bg-white border border-gray-200 text-gray-800 focus:border-[#f07639] focus:ring-1 focus:ring-[#f07639] rounded-xl outline-none transition-all text-sm"
+                  >
+                    <option value="">Seleccionar conductor (opcional)</option>
+                    {conductores.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombres} {c.apellidos}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 mt-2">
-                  <p className="text-xs text-blue-800">
-                    <strong>Nota:</strong> Al crear este viaje, se generará automáticamente el mapa de asientos en base a la capacidad y pisos del bus seleccionado. Esta acción es irreversible mediante UI.
-                  </p>
+
+                <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-100/80">
+                  <label className="block text-[13px] font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <div className="w-5 h-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+                      <Calendar className="w-3 h-3" />
+                    </div>
+                    Salida <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Fecha</label>
+                      <input
+                        type="date"
+                        required
+                        value={fechaSalidaDate}
+                        onChange={(e) => setFechaSalidaDate(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-800 focus:border-[#f07639] focus:ring-1 focus:ring-[#f07639] rounded-xl outline-none transition-all cursor-pointer shadow-sm text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Hora</label>
+                      <input
+                        type="time"
+                        required
+                        value={fechaSalidaTime}
+                        onChange={(e) => setFechaSalidaTime(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-gray-200 text-gray-800 focus:border-[#f07639] focus:ring-1 focus:ring-[#f07639] rounded-xl outline-none transition-all cursor-pointer shadow-sm text-sm"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-end space-x-3">
+              <div className="mt-6 flex justify-end items-center gap-3">
                 <button
                   type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-50 border border-slate-200 rounded-xl transition-colors font-medium"
+                  onClick={handleCloseForm}
+                  className="px-5 py-2.5 text-gray-500 hover:text-gray-700 transition-colors font-semibold text-sm rounded-xl hover:bg-gray-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="bg-gradient-to-r from-[#f07639] to-[#d8662d] hover:from-[#e06528] hover:to-[#c7551d] text-white px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105"
+                  className="bg-[#f07639] hover:bg-[#e06528] text-white px-6 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md shadow-[#f07639]/15 hover:shadow-lg hover:shadow-[#f07639]/25 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.02]"
                 >
-                  {isLoading ? "Programando..." : "Programar Viaje"}
+                  {isLoading ? "Guardando..." : (editingViajeId ? "Guardar Cambios" : "Programar Viaje")}
                 </button>
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
