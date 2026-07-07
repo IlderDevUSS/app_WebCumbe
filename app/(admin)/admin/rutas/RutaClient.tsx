@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, MapPin, Navigation, Clock, DollarSign } from "lucide-react";
-import { crearRuta, eliminarRuta } from "../../actions/rutas";
+import { Plus, Trash2, MapPin, Navigation, Clock, DollarSign, Pencil } from "lucide-react";
+import { crearRuta, eliminarRuta, actualizarRuta } from "../../actions/rutas";
 
 type Sucursal = {
   id: string;
@@ -30,6 +30,7 @@ export default function RutaClient({
   const [rutas, setRutas] = useState<Ruta[]>(initialRutas);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   
   useEffect(() => {
     setMounted(true);
@@ -46,19 +47,31 @@ export default function RutaClient({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleOpenModal = () => {
+  const handleOpenModal = (ruta?: Ruta) => {
     setError(null);
-    setFormData({
-      origen_id: sucursales.length > 0 ? sucursales[0].id : "",
-      destino_id: sucursales.length > 1 ? sucursales[1].id : "",
-      duracion_estimada_minutos: 120,
-      precio_base: 50.00,
-    });
+    if (ruta) {
+      setEditingId(ruta.id);
+      setFormData({
+        origen_id: ruta.origen_id,
+        destino_id: ruta.destino_id,
+        duracion_estimada_minutos: ruta.duracion_estimada_minutos,
+        precio_base: Number(ruta.precio_base),
+      });
+    } else {
+      setEditingId(null);
+      setFormData({
+        origen_id: sucursales.length > 0 ? sucursales[0].id : "",
+        destino_id: sucursales.length > 1 ? sucursales[1].id : "",
+        duracion_estimada_minutos: 120,
+        precio_base: 50.00,
+      });
+    }
     setIsModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
+    setEditingId(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -67,22 +80,38 @@ export default function RutaClient({
     setError(null);
 
     try {
-      const res = await crearRuta(formData);
-      if (res.success) {
-        // Obtenemos los nombres completos para la tabla optimística
-        const origen = sucursales.find(s => s.id === formData.origen_id)?.nombre || "";
-        const destino = sucursales.find(s => s.id === formData.destino_id)?.nombre || "";
-        
-        const nuevaRuta = {
-          ...res.data,
-          origen: { nombre: origen },
-          destino: { nombre: destino }
-        };
-
-        setRutas([nuevaRuta, ...rutas]);
-        handleCloseModal();
+      if (editingId) {
+        const res = await actualizarRuta(editingId, formData);
+        if (res.success) {
+          const origen = sucursales.find(s => s.id === formData.origen_id)?.nombre || "";
+          const destino = sucursales.find(s => s.id === formData.destino_id)?.nombre || "";
+          const rutaActualizada = {
+            ...res.data,
+            origen: { nombre: origen },
+            destino: { nombre: destino }
+          };
+          setRutas((prev) => prev.map((r) => (r.id === editingId ? rutaActualizada : r)));
+          handleCloseModal();
+        } else {
+          setError(res.error || "Error al actualizar ruta");
+        }
       } else {
-        setError(res.error || "Error al crear ruta");
+        const res = await crearRuta(formData);
+        if (res.success) {
+          const origen = sucursales.find(s => s.id === formData.origen_id)?.nombre || "";
+          const destino = sucursales.find(s => s.id === formData.destino_id)?.nombre || "";
+          
+          const nuevaRuta = {
+            ...res.data,
+            origen: { nombre: origen },
+            destino: { nombre: destino }
+          };
+
+          setRutas([nuevaRuta, ...rutas]);
+          handleCloseModal();
+        } else {
+          setError(res.error || "Error al crear ruta");
+        }
       }
     } catch (err) {
       setError("Error inesperado de red.");
@@ -175,13 +204,22 @@ export default function RutaClient({
                       </span>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <button
-                        onClick={() => handleDelete(ruta.id)}
-                        className="text-gray-400 hover:text-red-600 transition-colors"
-                        title="Eliminar"
-                      >
-                        <Trash2 className="w-5 h-5 inline-block" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleOpenModal(ruta)}
+                          className="text-gray-400 hover:text-blue-500 transition-colors"
+                          title="Editar"
+                        >
+                          <Pencil className="w-5 h-5 inline-block" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(ruta.id)}
+                          className="text-gray-400 hover:text-red-650 transition-colors"
+                          title="Eliminar"
+                        >
+                          <Trash2 className="w-5 h-5 inline-block" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -202,7 +240,7 @@ export default function RutaClient({
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="text-lg font-bold text-gray-900">Nueva Ruta</h3>
+              <h3 className="text-lg font-bold text-gray-900">{editingId ? "Editar Ruta" : "Nueva Ruta"}</h3>
               <button
                 onClick={handleCloseModal}
                 className="text-gray-400 hover:text-gray-600 transition-colors text-2xl leading-none"
@@ -298,7 +336,7 @@ export default function RutaClient({
                   disabled={isLoading}
                   className="bg-[#f07639] hover:bg-orange-600 text-white px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isLoading ? "Guardando..." : "Guardar"}
+                  {isLoading ? "Guardando..." : (editingId ? "Guardar Cambios" : "Guardar")}
                 </button>
               </div>
             </form>
