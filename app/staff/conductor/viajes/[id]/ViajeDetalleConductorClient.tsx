@@ -118,9 +118,9 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
       setGoogleMapsLoaded(true);
     };
 
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
     const script = document.createElement("script");
-    // NOTA: Para producción, reemplaza '&key=' por tu API Key real de Google Maps Cloud Console
-    script.src = `https://maps.googleapis.com/maps/api/js?callback=initGoogleMapsCallback`;
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initGoogleMapsCallback`;
     script.async = true;
     script.defer = true;
     document.head.appendChild(script);
