@@ -1,7 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowLeft, User, Search, UserCheck, UserMinus, QrCode, AlertCircle, CheckCircle } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { 
+  ArrowLeft, 
+  User, 
+  Search, 
+  UserCheck, 
+  UserMinus, 
+  QrCode, 
+  AlertCircle, 
+  CheckCircle, 
+  ClipboardList, 
+  Camera, 
+  CameraOff, 
+  Loader2 
+} from "lucide-react";
 import Link from "next/link";
 import { registrarAbordaje, validarBoletoQR } from "@/app/(admin)/actions/operario";
 
@@ -57,6 +70,58 @@ export default function ViajeDetalleOperarioClient({
   const [scanResult, setScanResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isScanning, setIsScanning] = useState(false);
 
+  // Cámara QR
+  const [html5QrcodeLoaded, setHtml5QrcodeLoaded] = useState(false);
+  const [cameraActive, setCameraActive] = useState(false);
+  const qrScannerRef = useRef<any>(null);
+
+  // Carga dinámica de la librería HTML5 QR Code
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/html5-qrcode";
+    script.async = true;
+    script.onload = () => setHtml5QrcodeLoaded(true);
+    document.head.appendChild(script);
+    return () => {
+      // Intentar detener el escáner si está activo al desmontar
+      if (qrScannerRef.current) {
+        qrScannerRef.current.stop().catch(() => {});
+      }
+      try {
+        document.head.removeChild(script);
+      } catch (e) {}
+    };
+  }, []);
+
+  // Generador de pitido nativo para feedback
+  const playBeep = (success: boolean) => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      if (success) {
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(800, audioCtx.currentTime); // Tono alto
+        gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.12);
+      } else {
+        oscillator.type = "sawtooth";
+        oscillator.frequency.setValueAtTime(150, audioCtx.currentTime); // Tono bajo/zumbido
+        gainNode.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        oscillator.start();
+        oscillator.stop(audioCtx.currentTime + 0.25);
+      }
+    } catch (e) {
+      console.warn("Feedback de audio bloqueado por políticas del navegador:", e);
+    }
+  };
+
   // Filtrar lista de pasajeros en base a búsqueda
   const filteredPasajeros = pasajeros.filter((p) => {
     const searchString = `${p.pasajero.nombres} ${p.pasajero.apellidos} ${p.pasajero.dni}`.toLowerCase();
@@ -86,18 +151,14 @@ export default function ViajeDetalleOperarioClient({
     }
   };
 
-  // Simulación de Escaneo QR
-  const handleScanQR = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!qrCodeInput.trim()) return;
-
+  // Lógica unificada de validación
+  const triggerValidation = async (code: string) => {
     setIsScanning(true);
     setScanResult(null);
 
     try {
-      const res = await validarBoletoQR(viaje.id, qrCodeInput.trim());
+      const res = await validarBoletoQR(viaje.id, code);
       if (res.success) {
-        // Actualizar lista
         setPasajeros(prev =>
           prev.map(p => p.id === res.data.id ? { ...p, abordado: true } : p)
         );
@@ -106,20 +167,83 @@ export default function ViajeDetalleOperarioClient({
           message: `¡Boleto Validado! Pasajero: ${res.data.pasajero.nombres} ${res.data.pasajero.apellidos} | Asiento: ${res.data.asiento_viaje.numero_asiento}`
         });
         setQrCodeInput("");
+        playBeep(true);
       } else {
         setScanResult({
           success: false,
           message: res.error || "Código QR no válido para este viaje."
         });
+        playBeep(false);
       }
     } catch (err) {
       setScanResult({
         success: false,
         message: "Error de conexión al validar boleto."
       });
+      playBeep(false);
     } finally {
       setIsScanning(false);
     }
+  };
+
+  // Escaneo QR manual
+  const handleScanQR = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!qrCodeInput.trim()) return;
+    await triggerValidation(qrCodeInput.trim());
+  };
+
+  // Controlar cámara
+  const startCameraScan = () => {
+    if (!html5QrcodeLoaded) return;
+    const Html5Qrcode = (window as any).Html5Qrcode;
+    if (!Html5Qrcode) return;
+
+    setCameraActive(true);
+    setScanResult(null);
+
+    setTimeout(() => {
+      try {
+        const scanner = new Html5Qrcode("reader");
+        qrScannerRef.current = scanner;
+
+        scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+          },
+          async (decodedText: string) => {
+            playBeep(true);
+            await stopCameraScan();
+            setQrCodeInput(decodedText);
+            await triggerValidation(decodedText);
+          },
+          (errorMessage: string) => {
+            // Ignorar errores de escaneo intermedios
+          }
+        ).catch((err: any) => {
+          console.error("Error starting html5Qrcode:", err);
+          alert("Error de permisos: Asegúrate de otorgar acceso a la cámara de tu dispositivo.");
+          setCameraActive(false);
+        });
+      } catch (e) {
+        console.error(e);
+        setCameraActive(false);
+      }
+    }, 300);
+  };
+
+  const stopCameraScan = async () => {
+    if (qrScannerRef.current) {
+      try {
+        await qrScannerRef.current.stop();
+      } catch (e) {
+        console.error(e);
+      }
+      qrScannerRef.current = null;
+    }
+    setCameraActive(false);
   };
 
   // Lista de códigos de prueba (pasajeros que no han abordado) para facilitar las pruebas
@@ -128,19 +252,29 @@ export default function ViajeDetalleOperarioClient({
   return (
     <div className="max-w-5xl mx-auto space-y-6">
       {/* Cabecera */}
-      <div className="flex items-center">
-        <Link 
-          href="/staff/operario" 
-          className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-slate-500 hover:text-[#f07639] mr-4 transition-colors border border-slate-100"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </Link>
-        <div>
-          <h1 className="text-xl font-bold text-slate-800">Manifiesto y Embarque</h1>
-          <p className="text-slate-500 text-xs font-semibold">
-            {viaje.ruta.origen.nombre} a {viaje.ruta.destino.nombre} | Bus: {viaje.bus.placa}
-          </p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center">
+          <Link 
+            href="/staff/operario" 
+            className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center text-slate-500 hover:text-[#f07639] mr-4 transition-colors border border-slate-100"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </Link>
+          <div>
+            <h1 className="text-xl font-bold text-slate-800">Manifiesto y Embarque</h1>
+            <p className="text-slate-500 text-xs font-semibold">
+              {viaje.ruta.origen.nombre} a {viaje.ruta.destino.nombre} | Bus: {viaje.bus.placa}
+            </p>
+          </div>
         </div>
+
+        <Link
+          href={`/staff/operario/viajes/${viaje.id}/manifiesto`}
+          className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] shrink-0 text-center justify-center"
+        >
+          <ClipboardList className="w-4 h-4" />
+          Ver Manifiesto SUTRAN
+        </Link>
       </div>
 
       {/* Grid Principal */}
@@ -263,34 +397,75 @@ export default function ViajeDetalleOperarioClient({
             </div>
           </div>
 
-          {/* Simulador de Lector QR */}
+          {/* Lector QR por Cámara y Manual */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 space-y-5">
             <div className="flex items-center gap-2">
               <QrCode className="w-5 h-5 text-[#f07639]" />
-              <h2 className="text-base font-extrabold text-slate-800">Simulador de Lector QR</h2>
+              <h2 className="text-base font-extrabold text-slate-800">Control de Boletos (QR)</h2>
             </div>
             
             <p className="text-xs text-slate-500 leading-relaxed">
-              Ingresa o escanea el código del boleto del pasajero para registrar automáticamente su ingreso al bus.
+              Escanea el código QR de un pasaje con la cámara o ingresa el código del boleto de manera manual.
             </p>
 
-            <form onSubmit={handleScanQR} className="space-y-3">
-              <input 
-                type="text"
-                placeholder="Código de Boleto (ej: QR-XXXXX)"
-                value={qrCodeInput}
-                onChange={(e) => setQrCodeInput(e.target.value)}
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200/80 focus:border-[#f07639]/30 rounded-xl focus:bg-white text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400"
-              />
-              <button
-                type="submit"
-                disabled={isScanning || !qrCodeInput.trim()}
-                className="w-full bg-[#f07639] hover:bg-[#e06528] text-white py-3 rounded-xl text-xs font-bold transition-all shadow-md shadow-[#f07639]/15 hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                <QrCode className="w-4 h-4" />
-                {isScanning ? "Validando..." : "Validar Boleto"}
-              </button>
-            </form>
+            {cameraActive ? (
+              <div className="space-y-3">
+                <div id="reader" className="w-full aspect-square bg-slate-900 rounded-2xl overflow-hidden border border-slate-200"></div>
+                <button
+                  type="button"
+                  onClick={stopCameraScan}
+                  className="w-full bg-red-50 hover:bg-red-100 text-red-700 py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  <CameraOff className="w-4 h-4" />
+                  Detener Cámara
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={startCameraScan}
+                  disabled={!html5QrcodeLoaded}
+                  className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {html5QrcodeLoaded ? (
+                    <>
+                      <Camera className="w-4 h-4" />
+                      Escanear con Cámara Web
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Cargando Cámara...
+                    </>
+                  )}
+                </button>
+
+                <div className="relative flex py-1 items-center text-slate-350">
+                  <div className="flex-grow border-t border-slate-100"></div>
+                  <span className="flex-shrink mx-3 text-[10px] font-black uppercase tracking-wider">O manual</span>
+                  <div className="flex-grow border-t border-slate-100"></div>
+                </div>
+
+                <form onSubmit={handleScanQR} className="space-y-3">
+                  <input 
+                    type="text"
+                    placeholder="Código de Boleto (ej: QR-XXXXX)"
+                    value={qrCodeInput}
+                    onChange={(e) => setQrCodeInput(e.target.value)}
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200/80 focus:border-[#f07639]/30 rounded-xl focus:bg-white text-xs font-semibold text-slate-700 outline-none transition-all placeholder:text-slate-400"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isScanning || !qrCodeInput.trim()}
+                    className="w-full bg-[#f07639] hover:bg-[#e06528] text-white py-3 rounded-xl text-xs font-bold transition-all shadow-md shadow-[#f07639]/15 hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
+                  >
+                    <QrCode className="w-4 h-4" />
+                    {isScanning ? "Validando..." : "Validar Boleto"}
+                  </button>
+                </form>
+              </div>
+            )}
 
             {/* Resultado del Escaneo */}
             {scanResult && (
@@ -302,10 +477,10 @@ export default function ViajeDetalleOperarioClient({
                 {scanResult.success ? (
                   <CheckCircle className="w-5 h-5 text-green-600 shrink-0 mt-0.5" />
                 ) : (
-                  <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <AlertCircle className="w-5 h-5 text-red-650 shrink-0 mt-0.5" />
                 )}
                 <div>
-                  <p className="font-extrabold">{scanResult.success ? "Escaneo Exitoso" : "Error de Validación"}</p>
+                  <p className="font-extrabold">{scanResult.success ? "Boleto Procesado" : "Error de Validación"}</p>
                   <p className="font-medium text-[11px] mt-0.5">{scanResult.message}</p>
                 </div>
               </div>

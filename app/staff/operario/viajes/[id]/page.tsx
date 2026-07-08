@@ -19,6 +19,7 @@ export default async function DetalleViajeOperarioPage({ params }: { params: Pro
     include: {
       ruta: { include: { origen: { select: { nombre: true } }, destino: { select: { nombre: true } } } },
       bus: { select: { placa: true, capacidad: true, pisos: true } },
+      conductor: { select: { nombres: true, apellidos: true, dni: true } },
     }
   });
 
