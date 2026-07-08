@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { updateEstadoViaje, registrarGasto, registrarOcurrenciaRuta } from "@/app/(admin)/actions/conductor";
+import { updateEstadoViaje, registrarGasto, registrarOcurrenciaRuta, marcarAlertaLeida } from "@/app/(admin)/actions/conductor";
 import { ArrowLeft, MapPin, Bus, Clock, Box, Play, CheckCircle, Receipt, Wrench, AlertCircle, Wifi, WifiOff, Navigation, ClipboardList } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -702,6 +702,38 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
           </div>
         </div>
       )}
+
+      {/* Alertas de la Central para este Viaje */}
+      {mounted && (viaje.alertas || []).filter((a: any) => !a.leido).map((alerta: any) => (
+        <div key={alerta.id} className="bg-red-50 border border-red-200 text-red-950 rounded-2xl p-4 mb-6 flex items-start justify-between animate-fadeIn text-sm gap-4 shadow-[0_4px_20px_rgb(239,68,68,0.03)]">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-5 h-5 text-red-650 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-extrabold text-red-700 uppercase tracking-wide text-xs mb-0.5">Alerta Urgente de la Central</p>
+              <p className="font-semibold text-slate-800 leading-relaxed">{alerta.mensaje}</p>
+              <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase" suppressHydrationWarning>
+                Enviado: {new Date(alerta.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          </div>
+          <button 
+            disabled={isUpdating}
+            onClick={async () => {
+              setIsUpdating(true);
+              const res = await marcarAlertaLeida(Number(alerta.id));
+              if (res.success) {
+                router.refresh();
+              } else {
+                alert("No se pudo marcar la alerta como leída.");
+              }
+              setIsUpdating(false);
+            }}
+            className="text-red-700 hover:text-red-900 text-xs font-black uppercase tracking-wider bg-red-100 hover:bg-red-150 px-3 py-1.5 rounded-xl transition-all active:scale-95 shrink-0"
+          >
+            Leído
+          </button>
+        </div>
+      ))}
 
       {/* Alerta GPS Notificación */}
       {mounted && lastNotification && (
