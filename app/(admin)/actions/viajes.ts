@@ -2,6 +2,16 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+// Función auxiliar para verificar si el usuario tiene rol de administrador o vendedor
+async function checkAdminOrVendedor() {
+  const session = await getServerSession(authOptions);
+  if (!session || (session.user.role !== "admin" && session.user.role !== "vendedor")) {
+    throw new Error("Acceso no autorizado. Debe ser administrador o vendedor.");
+  }
+}
 
 // Función auxiliar para parsear y validar ID numéricos / BigInt
 function parseId(id: string | number | bigint): bigint {
@@ -19,6 +29,7 @@ function serializeBigInt<T>(obj: T): any {
 
 export async function obtenerViajes() {
   try {
+    await checkAdminOrVendedor();
     const viajes = await prisma.viaje.findMany({
       include: {
         ruta: {
@@ -41,6 +52,7 @@ export async function obtenerViajes() {
 
 export async function obtenerConductores() {
   try {
+    await checkAdminOrVendedor();
     const conductores = await prisma.persona.findMany({
       where: {
         usuario: {
@@ -63,6 +75,7 @@ export async function crearViajeConAsientos(data: {
   fecha_llegada?: string 
 }) {
   try {
+    await checkAdminOrVendedor();
     const rutaId = parseId(data.ruta_id);
     const busId = parseId(data.bus_id);
     const conductorId = data.conductor_id ? parseId(data.conductor_id) : undefined;
@@ -170,6 +183,7 @@ export async function crearViajeConAsientos(data: {
 
 export async function cancelarViaje(id: string | number) {
   try {
+    await checkAdminOrVendedor();
     const viajeId = parseId(id);
     
     await prisma.viaje.update({
@@ -193,6 +207,7 @@ export async function actualizarViaje(id: string | number, data: {
   fecha_llegada?: string;
 }) {
   try {
+    await checkAdminOrVendedor();
     const viajeId = parseId(id);
     const rutaId = parseId(data.ruta_id);
     const busId = parseId(data.bus_id);
@@ -320,6 +335,7 @@ export async function actualizarViaje(id: string | number, data: {
 
 export async function enviarAlertaCentral(viajeId: string | number, mensaje: string) {
   try {
+    await checkAdminOrVendedor();
     const vId = parseId(viajeId);
     if (!mensaje.trim()) {
       return { success: false, error: "El mensaje no puede estar vacío." };

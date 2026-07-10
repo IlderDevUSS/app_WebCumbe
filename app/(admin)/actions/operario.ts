@@ -2,6 +2,16 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+
+// Función auxiliar para verificar si el usuario tiene rol de operario o administrador
+async function checkOperarioOrAdmin() {
+  const session = await getServerSession(authOptions);
+  if (!session || (session.user.role !== "operario" && session.user.role !== "admin")) {
+    throw new Error("Acceso no autorizado. Debe ser operario o administrador.");
+  }
+}
 
 // Función auxiliar para convertir BigInt y Decimal de forma segura para el Cliente
 function serializeBigInt<T>(obj: T): any {
@@ -14,6 +24,7 @@ function serializeBigInt<T>(obj: T): any {
 
 export async function obtenerViajesOperario() {
   try {
+    await checkOperarioOrAdmin();
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
 
@@ -69,6 +80,7 @@ export async function obtenerViajesOperario() {
 
 export async function obtenerPasajerosViaje(viajeId: string | number) {
   try {
+    await checkOperarioOrAdmin();
     const id = BigInt(viajeId);
     const pasajes = await prisma.pasaje.findMany({
       where: {
@@ -104,6 +116,7 @@ export async function obtenerPasajerosViaje(viajeId: string | number) {
 
 export async function registrarAbordaje(pasajeId: string | number, abordado: boolean) {
   try {
+    await checkOperarioOrAdmin();
     const id = BigInt(pasajeId);
     
     // Obtener primero el viaje_id asociado
@@ -138,6 +151,7 @@ export async function registrarAbordaje(pasajeId: string | number, abordado: boo
 
 export async function validarBoletoQR(viajeId: string | number, codigoQr: string) {
   try {
+    await checkOperarioOrAdmin();
     const vId = BigInt(viajeId);
     const pasaje = await prisma.pasaje.findFirst({
       where: {
