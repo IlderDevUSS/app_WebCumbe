@@ -113,6 +113,15 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
 
   const paradas = getParadas(viaje.ruta.origen.nombre, viaje.ruta.destino.nombre);
 
+  // Obtener pasajes válidos y estadísticas de abordaje reales
+  const pasajes = viaje.asientos_viaje
+    ? viaje.asientos_viaje.map((av: any) => av.pasaje).filter((p: any) => p !== null && p !== undefined)
+    : [];
+
+  const totalComprados = pasajes.length;
+  const totalAbordados = pasajes.filter((p: any) => p.abordado).length;
+  const totalPendientes = totalComprados - totalAbordados;
+
   // Desactivamos la carga de la API embebida de Google Maps para evitar el cartel de error comercial de Google.
   // En su lugar, el conductor utilizará el botón de lanzamiento a la app nativa y el progreso de paradas local.
   useEffect(() => {
@@ -180,6 +189,10 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
     if (viaje.estado === "programado") {
       localStorage.removeItem(`completed_stops_${viaje.id}`);
       setCompletedStops([]);
+    } else if (viaje.estado === "completado") {
+      // Si el viaje ya está completado en base de datos, forzamos todas las paradas como completadas al 100%
+      setCompletedStops(paradas);
+      localStorage.setItem(`completed_stops_${viaje.id}`, JSON.stringify(paradas));
     } else {
       const paradasSaved = localStorage.getItem(`completed_stops_${viaje.id}`);
       if (paradasSaved) {
@@ -569,6 +582,9 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
     if (res.success) {
       if (nuevoEstado === "completado") {
         stopGpsTracking();
+        // Al completar el viaje, se auto-completan todas las paradas en cascada
+        setCompletedStops(paradas);
+        localStorage.setItem(`completed_stops_${viaje.id}`, JSON.stringify(paradas));
       }
       router.refresh();
     } else {
@@ -893,9 +909,14 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
                   <p className="text-[11px] text-slate-400 font-bold uppercase mb-1">Tiempo Estimado</p>
                   <p className="text-xl font-extrabold text-slate-700">{formatDuracion(viaje.ruta.duracion_estimada_minutos)}</p>
                 </div>
-                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-center">
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-center flex flex-col justify-center min-h-[90px]">
                   <p className="text-[11px] text-slate-400 font-bold uppercase mb-1">Pasajeros</p>
-                  <p className="text-xl font-extrabold text-slate-700">{viaje.bus.capacidad}</p>
+                  <p className="text-xl font-extrabold text-slate-700">
+                    {totalAbordados} <span className="text-slate-400 text-sm font-semibold">/ {totalComprados}</span>
+                  </p>
+                  <p className="text-[9px] text-slate-500 font-bold mt-1.5 leading-normal">
+                    No subieron: {totalPendientes} <br /> Aforo: {viaje.bus.capacidad}
+                  </p>
                 </div>
                 <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-center">
                   <p className="text-[11px] text-slate-400 font-bold uppercase mb-1">Bultos Bodega</p>

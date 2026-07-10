@@ -33,6 +33,11 @@ export default async function DetalleViajeConductorPage({ params }: { params: Pr
       gastos: true,
       novedades: true,
       bitacoras: true,
+      asientos_viaje: {
+        include: {
+          pasaje: true
+        }
+      }
     }
   });
 
