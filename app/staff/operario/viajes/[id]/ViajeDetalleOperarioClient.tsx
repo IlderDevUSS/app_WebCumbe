@@ -78,11 +78,23 @@ export default function ViajeDetalleOperarioClient({
   // Carga dinámica de la librería HTML5 QR Code
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    // Si la librería ya está cargada globalmente en el window, no inyectar otra vez
+    if ((window as any).Html5Qrcode) {
+      setHtml5QrcodeLoaded(true);
+      return () => {
+        if (qrScannerRef.current) {
+          qrScannerRef.current.stop().catch(() => {});
+        }
+      };
+    }
+
     const script = document.createElement("script");
     script.src = "https://unpkg.com/html5-qrcode";
     script.async = true;
     script.onload = () => setHtml5QrcodeLoaded(true);
     document.head.appendChild(script);
+    
     return () => {
       // Intentar detener el escáner si está activo al desmontar
       if (qrScannerRef.current) {
@@ -250,7 +262,7 @@ export default function ViajeDetalleOperarioClient({
   const codigosDePrueba = pasajeros.filter(p => !p.abordado && p.codigo_qr);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6 px-1 sm:px-0">
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center">
@@ -270,7 +282,7 @@ export default function ViajeDetalleOperarioClient({
 
         <Link
           href={`/staff/operario/viajes/${viaje.id}/manifiesto`}
-          className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] shrink-0 text-center justify-center"
+          className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all hover:scale-[1.02] shrink-0 text-center justify-center w-full sm:w-auto"
         >
           <ClipboardList className="w-4 h-4" />
           Ver Manifiesto SUTRAN
@@ -282,7 +294,7 @@ export default function ViajeDetalleOperarioClient({
         
         {/* Lado Izquierdo: Listado de Pasajeros */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm p-6 space-y-5">
+          <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden shadow-sm p-4 sm:p-6 space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <h2 className="text-base font-extrabold text-slate-800">Lista de Pasajeros</h2>
               
@@ -306,62 +318,106 @@ export default function ViajeDetalleOperarioClient({
                   {searchTerm ? "No se encontraron pasajeros para esta búsqueda." : "No hay pasajeros registrados para este viaje."}
                 </div>
               ) : (
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[10px] uppercase font-black text-slate-400 tracking-wider">
-                      <th className="py-2 text-center w-16">Asiento</th>
-                      <th className="py-2">Pasajero</th>
-                      <th className="py-2 text-center">DNI</th>
-                      <th className="py-2 text-right">Abordaje</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50 text-sm">
+                <>
+                  {/* Vista de Tabla para Desktop */}
+                  <table className="w-full text-left border-collapse hidden sm:table">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] uppercase font-black text-slate-400 tracking-wider">
+                        <th className="py-2 text-center w-16">Asiento</th>
+                        <th className="py-2">Pasajero</th>
+                        <th className="py-2 text-center">DNI</th>
+                        <th className="py-2 text-right">Abordaje</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 text-sm">
+                      {filteredPasajeros.map((pasaje) => (
+                        <tr key={pasaje.id} className="hover:bg-slate-50/20 transition-colors">
+                          <td className="py-3 text-center">
+                            <span className="w-7 h-7 rounded-lg bg-orange-50 text-[#f07639] border border-orange-100 flex items-center justify-center text-xs font-black mx-auto">
+                              {pasaje.asiento_viaje.numero_asiento}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <div>
+                              <p className="font-bold text-slate-800 leading-tight">
+                                {pasaje.pasajero.apellidos}, {pasaje.pasajero.nombres}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-semibold uppercase">
+                                Piso {pasaje.asiento_viaje.piso}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 text-center font-semibold text-slate-600">
+                            {pasaje.pasajero.dni}
+                          </td>
+                          <td className="py-3 text-right">
+                            <button
+                              onClick={() => handleToggleAbordaje(pasaje.id, pasaje.abordado)}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ml-auto ${
+                                pasaje.abordado
+                                  ? "bg-green-50 text-green-700 hover:bg-green-100/80 border border-green-100"
+                                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-100"
+                              }`}
+                            >
+                              {pasaje.abordado ? (
+                                <>
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  A Bordo
+                                </>
+                              ) : (
+                                <>
+                                  <UserMinus className="w-3.5 h-3.5" />
+                                  Pendiente
+                                </>
+                              )}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Vista de Tarjetas para Móvil */}
+                  <div className="sm:hidden space-y-2">
                     {filteredPasajeros.map((pasaje) => (
-                      <tr key={pasaje.id} className="hover:bg-slate-50/20 transition-colors">
-                        <td className="py-3 text-center">
-                          <span className="w-7 h-7 rounded-lg bg-orange-50 text-[#f07639] border border-orange-100 flex items-center justify-center text-xs font-black mx-auto">
+                      <div key={pasaje.id} className="flex items-center justify-between p-3 bg-slate-50/50 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-8 h-8 rounded-lg bg-orange-50 text-[#f07639] border border-orange-100 flex items-center justify-center text-xs font-black shrink-0">
                             {pasaje.asiento_viaje.numero_asiento}
                           </span>
-                        </td>
-                        <td className="py-3">
-                          <div>
-                            <p className="font-bold text-slate-800 leading-tight">
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-800 text-sm truncate">
                               {pasaje.pasajero.apellidos}, {pasaje.pasajero.nombres}
                             </p>
-                            <span className="text-[10px] text-slate-400 font-semibold uppercase">
-                              Piso {pasaje.asiento_viaje.piso}
-                            </span>
+                            <p className="text-[10px] text-slate-400 font-semibold">
+                              DNI: {pasaje.pasajero.dni} · Piso {pasaje.asiento_viaje.piso}
+                            </p>
                           </div>
-                        </td>
-                        <td className="py-3 text-center font-semibold text-slate-600">
-                          {pasaje.pasajero.dni}
-                        </td>
-                        <td className="py-3 text-right">
-                          <button
-                            onClick={() => handleToggleAbordaje(pasaje.id, pasaje.abordado)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ml-auto ${
-                              pasaje.abordado
-                                ? "bg-green-50 text-green-700 hover:bg-green-100/80 border border-green-100"
-                                : "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-100"
-                            }`}
-                          >
-                            {pasaje.abordado ? (
-                              <>
-                                <UserCheck className="w-3.5 h-3.5" />
-                                A Bordo
-                              </>
-                            ) : (
-                              <>
-                                <UserMinus className="w-3.5 h-3.5" />
-                                Pendiente
-                              </>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
+                        </div>
+                        <button
+                          onClick={() => handleToggleAbordaje(pasaje.id, pasaje.abordado)}
+                          className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all flex items-center gap-1 shrink-0 ${
+                            pasaje.abordado
+                              ? "bg-green-50 text-green-700 border border-green-100"
+                              : "bg-slate-100 text-slate-600 border border-slate-100"
+                          }`}
+                        >
+                          {pasaje.abordado ? (
+                            <>
+                              <UserCheck className="w-3 h-3" />
+                              Bordo
+                            </>
+                          ) : (
+                            <>
+                              <UserMinus className="w-3 h-3" />
+                              Pend.
+                            </>
+                          )}
+                        </button>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                </>
               )}
             </div>
           </div>
