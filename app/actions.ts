@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { serializeBigInt } from "@/lib/utils";
 import bcrypt from "bcrypt";
 import { z } from "zod";
-import { Resend } from "resend";
+// import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Rate limiting en memoria (Anti-DDoS básico)
 const rateLimits = new Map<string, { count: number; resetTime: number }>();
