@@ -166,7 +166,7 @@ export default function LibroReclamacionesPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-white to-orange-50/15 relative overflow-hidden">
+    <div className="flex flex-col min-h-screen bg-transparent relative overflow-hidden">
       {/* Background decoration */}
       <div className="absolute top-[30%] -left-36 w-[400px] h-[400px] bg-orange-200/10 rounded-full filter blur-3xl pointer-events-none z-0"></div>
       <div className="absolute bottom-[30%] -right-36 w-[400px] h-[400px] bg-amber-100/10 rounded-full filter blur-3xl pointer-events-none z-0"></div>
