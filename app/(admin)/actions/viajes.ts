@@ -39,6 +39,7 @@ export async function obtenerViajes() {
           }
         },
         bus: { select: { placa: true, capacidad: true, pisos: true } },
+        conductor: { select: { nombres: true, apellidos: true } },
       },
       orderBy: { fecha_salida: "desc" },
     });
@@ -123,6 +124,16 @@ export async function crearViajeConAsientos(data: {
           fecha_llegada: fechaLlegada,
           estado: "programado",
         },
+        include: {
+          ruta: {
+            include: {
+              origen: { select: { nombre: true } },
+              destino: { select: { nombre: true } }
+            }
+          },
+          bus: { select: { placa: true, capacidad: true, pisos: true } },
+          conductor: { select: { nombres: true, apellidos: true } }
+        }
       });
 
       // 2. Generar el array de asientos basado en la lógica de pisos
@@ -303,7 +314,6 @@ export async function actualizarViaje(id: string | number, data: {
         });
       }
 
-      // Actualizar el viaje
       return await tx.viaje.update({
         where: { id: viajeId },
         data: {
@@ -320,7 +330,8 @@ export async function actualizarViaje(id: string | number, data: {
               destino: { select: { nombre: true } }
             }
           },
-          bus: { select: { placa: true, capacidad: true, pisos: true } }
+          bus: { select: { placa: true, capacidad: true, pisos: true } },
+          conductor: { select: { nombres: true, apellidos: true } }
         }
       });
     });

@@ -401,13 +401,24 @@ export async function getClienteProfile(email: string) {
 }
 
 // 7. updateClienteProfile
+
 export async function updateClienteProfile(
   email: string,
-  data: { nombre: string; dni?: string; telefono?: string; newPassword?: string }
+  data: { nombre: string; correo?: string; dni?: string; telefono?: string; newPassword?: string }
 ) {
   try {
     const usuario = await prisma.usuario.findUnique({ where: { correo: email } });
     if (!usuario) throw new Error("Usuario no encontrado");
+
+    // Verificar si el nuevo correo electrónico ya está tomado
+    if (data.correo && data.correo.trim().toLowerCase() !== email.toLowerCase()) {
+      const correoExiste = await prisma.usuario.findUnique({
+        where: { correo: data.correo.trim().toLowerCase() }
+      });
+      if (correoExiste) {
+        return { success: false, error: "El correo electrónico ingresado ya está registrado por otra cuenta." };
+      }
+    }
 
     const partes = data.nombre.trim().split(" ");
     const nombres = partes[0] || "";
@@ -423,17 +434,28 @@ export async function updateClienteProfile(
       },
     });
 
+    let usuarioActualizado = usuario;
+
+    // Actualizar el correo si cambió
+    if (data.correo && data.correo.trim().toLowerCase() !== email.toLowerCase()) {
+      usuarioActualizado = await prisma.usuario.update({
+        where: { id: usuario.id },
+        data: { correo: data.correo.trim().toLowerCase() },
+      });
+    }
+
+    // Actualizar contraseña si se ingresó
     if (data.newPassword && data.newPassword.trim().length >= 6) {
       const hashedPassword = await bcrypt.hash(data.newPassword, 10);
-      await prisma.usuario.update({
+      usuarioActualizado = await prisma.usuario.update({
         where: { id: usuario.id },
         data: { contrasena: hashedPassword },
       });
     }
 
-    return { success: true, user: serializeBigInt({ ...usuario, persona: personaActualizada }) };
+    return { success: true, user: serializeBigInt({ ...usuarioActualizado, persona: personaActualizada }) };
   } catch (error: any) {
-    console.error("Error al actualizar perfil de cliente:", error);
+    console.error("Error al actualizar perfil:", error);
     let errorMessage = "Ocurrió un error inesperado al guardar los datos.";
     
     // Controlar DNI duplicado
@@ -444,6 +466,7 @@ export async function updateClienteProfile(
     return { success: false, error: errorMessage };
   }
 }
+
 
 // 8. getAdminDashboardStats
 export async function getAdminDashboardStats() {
