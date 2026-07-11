@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { updateEstadoViaje, registrarGasto, registrarOcurrenciaRuta, marcarAlertaLeida } from "@/app/(admin)/actions/conductor";
-import { ArrowLeft, MapPin, Bus, Clock, Box, Play, CheckCircle, Receipt, Wrench, AlertCircle, Wifi, WifiOff, Navigation, ClipboardList } from "lucide-react";
+import { updateEstadoViaje, registrarGasto, registrarOcurrenciaRuta, marcarAlertaLeida, eliminarGasto, eliminarBitacora, resolverIncidente } from "@/app/(admin)/actions/conductor";
+import { ArrowLeft, MapPin, Bus, Clock, Box, Play, CheckCircle, Receipt, Wrench, AlertCircle, Wifi, WifiOff, Navigation, ClipboardList, Trash2, CheckSquare } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -67,6 +67,57 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
   
   // Paradas completadas en la hoja de ruta
   const [completedStops, setCompletedStops] = useState<string[]>([]);
+
+  // Estado y handler de notificaciones flotantes (Toasts/Nubesitas)
+  const [toast, setToast] = useState<{
+    mostrar: boolean;
+    mensaje: string;
+    tipo: "exito" | "error" | "advertencia" | "info";
+  }>({
+    mostrar: false,
+    mensaje: "",
+    tipo: "info",
+  });
+
+  const showToast = (mensaje: string, tipo: "exito" | "error" | "advertencia" | "info" = "info") => {
+    setToast({ mostrar: true, mensaje, tipo });
+  };
+
+  // Mantener showAlert apuntando a showToast para compatibilidad con las llamadas del flujo
+  const showAlert = (mensaje: string, tipo: "exito" | "error" | "advertencia" | "info" = "info") => {
+    showToast(mensaje, tipo);
+  };
+
+  useEffect(() => {
+    if (toast.mostrar) {
+      const timer = setTimeout(() => {
+        setToast(prev => ({ ...prev, mostrar: false }));
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [toast.mostrar]);
+
+  // Estado y handler de confirmaciones personalizadas
+  const [modalConfirmar, setModalConfirmar] = useState<{
+    mostrar: boolean;
+    mensaje: string;
+    onConfirm: () => void;
+  }>({
+    mostrar: false,
+    mensaje: "",
+    onConfirm: () => {},
+  });
+
+  const showConfirm = (mensaje: string, callback: () => void) => {
+    setModalConfirmar({
+      mostrar: true,
+      mensaje,
+      onConfirm: () => {
+        callback();
+        setModalConfirmar(prev => ({ ...prev, mostrar: false }));
+      }
+    });
+  };
 
   // Estados de ubicación GPS real
   const [currentCoords, setCurrentCoords] = useState<StopCoords | null>(null);
@@ -444,7 +495,7 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
   // Simular movimiento GPS (inyectar coordenadas de prueba)
   const triggerSimulatedLocation = (stopName: string) => {
     if (viaje.estado !== "en_ruta") {
-      alert("⚠️ Debes iniciar el viaje antes de poder simular el GPS.");
+      showAlert("Debes iniciar el viaje antes de poder simular el GPS.", "advertencia");
       return;
     }
     const coords = STOP_COORDINATES[stopName];
@@ -492,11 +543,11 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
       setLocalNovedades([]);
 
       if (successCount > 0) {
-        alert(`✅ ¡Sincronización exitosa! Se subieron ${successCount} registros pendientes al servidor.`);
+        showAlert(`¡Sincronización exitosa! Se subieron ${successCount} registros pendientes al servidor.`, "exito");
         router.refresh();
       }
     } catch (err) {
-      alert("⚠️ Error de conexión durante la sincronización. Se reintentará al recuperar señal.");
+      showAlert("Error de conexión durante la sincronización. Se reintentará al recuperar señal.", "advertencia");
     } finally {
       setIsUpdating(false);
     }
@@ -543,13 +594,13 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
             checkProximity(latitude, longitude);
             router.refresh();
           } else {
-            alert("Error al iniciar viaje en el servidor.");
+            showAlert("Error al iniciar viaje en el servidor.", "error");
           }
           setIsUpdating(false);
         },
         async (error) => {
           // Permiso denegado: iniciar de todos modos pero avisar
-          alert("⚠️ Permiso de GPS denegado. El viaje se iniciará de todos modos, pero el conductor deberá marcar las paradas de forma manual en el checklist.");
+          showAlert("Permiso de GPS denegado. El viaje se iniciará de todos modos, pero el conductor deberá marcar las paradas de forma manual en el checklist.", "advertencia");
           const res = await updateEstadoViaje(viaje.id, "en_ruta");
           if (res.success) {
             // Auto-marcar la primera parada (Origen) por defecto al iniciar
@@ -560,7 +611,7 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
             }
             router.refresh();
           } else {
-            alert("Error al iniciar viaje en el servidor.");
+            showAlert("Error al iniciar viaje en el servidor.", "error");
           }
           setIsUpdating(false);
         },
@@ -573,24 +624,25 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
 
   const handleEstadoChange = async (nuevoEstado: string) => {
     if (isOffline) {
-      alert("⚠️ No puedes cambiar el estado del viaje mientras estás Sin Señal.");
+      showAlert("No puedes cambiar el estado del viaje mientras estás Sin Señal.", "advertencia");
       return;
     }
-    if (!confirm(`¿Estás seguro de marcar el viaje como ${nuevoEstado.replace('_', ' ')}?`)) return;
-    setIsUpdating(true);
-    const res = await updateEstadoViaje(viaje.id, nuevoEstado);
-    if (res.success) {
-      if (nuevoEstado === "completado") {
-        stopGpsTracking();
-        // Al completar el viaje, se auto-completan todas las paradas en cascada
-        setCompletedStops(paradas);
-        localStorage.setItem(`completed_stops_${viaje.id}`, JSON.stringify(paradas));
+    showConfirm(`¿Estás seguro de marcar el viaje como ${nuevoEstado.replace('_', ' ')}?`, async () => {
+      setIsUpdating(true);
+      const res = await updateEstadoViaje(viaje.id, nuevoEstado);
+      if (res.success) {
+        if (nuevoEstado === "completado") {
+          stopGpsTracking();
+          // Al completar el viaje, se auto-completan todas las paradas en cascada
+          setCompletedStops(paradas);
+          localStorage.setItem(`completed_stops_${viaje.id}`, JSON.stringify(paradas));
+        }
+        router.refresh();
+      } else {
+        showAlert("Error al actualizar estado del viaje.", "error");
       }
-      router.refresh();
-    } else {
-      alert("Error al actualizar estado");
-    }
-    setIsUpdating(false);
+      setIsUpdating(false);
+    });
   };
 
   const handleGuardarGasto = async (e: React.FormEvent) => {
@@ -610,7 +662,7 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
       setLocalGastos(updatedLocalGastos);
       localStorage.setItem(`queued_gastos_${viaje.id}`, JSON.stringify(updatedLocalGastos));
       setGastoForm({ concepto: "", monto: "" });
-      alert("💾 Gasto guardado localmente. Se sincronizará cuando recuperes señal.");
+      showAlert("Gasto guardado localmente. Se sincronizará cuando recuperes señal.", "info");
       setIsUpdating(false);
     } else {
       // Enviar al servidor
@@ -623,9 +675,9 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
       if (res.success) {
         setGastoForm({ concepto: "", monto: "" });
         router.refresh();
-        alert("Gasto registrado con éxito.");
+        showAlert("Gasto registrado con éxito.", "exito");
       } else {
-        alert("Error al registrar gasto.");
+        showAlert("Error al registrar gasto.", "error");
       }
       setIsUpdating(false);
     }
@@ -643,14 +695,14 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
         tipo: novedadForm.tipo,
         gravedad: novedadForm.gravedad,
         descripcion: `${novedadForm.descripcion} (Local/Pendiente)`,
-        retraso_minutos: Number(novedadForm.retraso_minutos),
+        retraso_minutos: 0,
         created_at: new Date().toISOString()
       };
       const updatedLocalNovedades = [...localNovedades, nuevaNovedadLocal];
       setLocalNovedades(updatedLocalNovedades);
       localStorage.setItem(`queued_novedades_${viaje.id}`, JSON.stringify(updatedLocalNovedades));
       setNovedadForm({ tipo: "Tránsito", gravedad: "Baja", descripcion: "", retraso_minutos: "0" });
-      alert("💾 Ocurrencia guardada localmente. Se sincronizará al conectar señal.");
+      showAlert("Ocurrencia guardada localmente. Se sincronizará al conectar señal.", "info");
       setIsUpdating(false);
     } else {
       // Enviar al servidor
@@ -660,23 +712,79 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
         tipo: novedadForm.tipo,
         gravedad: novedadForm.gravedad,
         descripcion: novedadForm.descripcion,
-        retraso_minutos: Number(novedadForm.retraso_minutos)
+        retraso_minutos: 0
       });
       if (res.success) {
         setNovedadForm({ tipo: "Tránsito", gravedad: "Baja", descripcion: "", retraso_minutos: "0" });
         router.refresh();
-        alert("✔️ Incidente de bitácora registrado con éxito.");
+        showAlert("Incidente de bitácora registrado con éxito.", "exito");
       } else {
-        alert("Error al registrar incidente.");
+        showAlert("Error al registrar incidente.", "error");
       }
       setIsUpdating(false);
     }
   };
 
+  const handleEliminarGastoClient = async (gastoId: string | number) => {
+    showConfirm("¿Estás seguro de que deseas eliminar este gasto de la ruta?", async () => {
+      setIsUpdating(true);
+      if (typeof gastoId === "string" && gastoId.startsWith("local-g_")) {
+        const updated = localGastos.filter(g => g.id !== gastoId);
+        setLocalGastos(updated);
+        localStorage.setItem(`queued_gastos_${viaje.id}`, JSON.stringify(updated));
+        showAlert("Gasto local eliminado correctamente.", "exito");
+      } else {
+        const res = await eliminarGasto(Number(gastoId));
+        if (res.success) {
+          router.refresh();
+          showAlert("Gasto eliminado correctamente.", "exito");
+        } else {
+          showAlert(res.error || "No se pudo eliminar el gasto.", "error");
+        }
+      }
+      setIsUpdating(false);
+    });
+  };
+
+  const handleEliminarBitacoraClient = async (bitacoraId: string | number) => {
+    showConfirm("¿Estás seguro de que deseas eliminar este reporte de la bitácora?", async () => {
+      setIsUpdating(true);
+      if (typeof bitacoraId === "string" && bitacoraId.startsWith("local-n_")) {
+        const updated = localNovedades.filter(n => n.id !== bitacoraId);
+        setLocalNovedades(updated);
+        localStorage.setItem(`queued_novedades_${viaje.id}`, JSON.stringify(updated));
+        showAlert("Reporte local de bitácora eliminado.", "exito");
+      } else {
+        const res = await eliminarBitacora(Number(bitacoraId));
+        if (res.success) {
+          router.refresh();
+          showAlert("Registro de bitácora eliminado correctamente.", "exito");
+        } else {
+          showAlert(res.error || "No se pudo eliminar el registro.", "error");
+        }
+      }
+      setIsUpdating(false);
+    });
+  };
+
+  const handleResolverIncidenteClient = async (bitacoraId: string | number) => {
+    showConfirm("¿Estás seguro de marcar esta incidencia como SOLUCIONADA?", async () => {
+      setIsUpdating(true);
+      const res = await resolverIncidente(Number(bitacoraId));
+      if (res.success) {
+        router.refresh();
+        showAlert("Incidencia marcada como solucionada con éxito.", "exito");
+      } else {
+        showAlert(res.error || "No se pudo actualizar el estado de la incidencia.", "error");
+      }
+      setIsUpdating(false);
+    });
+  };
+
   // Toggle de parada manual con lógica de cascada para paradas anteriores
   const handleToggleParada = (stopName: string) => {
     if (viaje.estado !== "en_ruta") {
-      alert("⚠️ Debes iniciar el viaje antes de registrar el progreso de las paradas.");
+      showAlert("Debes iniciar el viaje antes de registrar el progreso de las paradas.", "advertencia");
       return;
     }
     const stopIndex = paradas.indexOf(stopName);
@@ -795,7 +903,7 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
               if (res.success) {
                 router.refresh();
               } else {
-                alert("No se pudo marcar la alerta como leída.");
+                showAlert("No se pudo marcar la alerta como leída.", "error");
               }
               setIsUpdating(false);
             }}
@@ -1109,7 +1217,17 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
               {allGastos.map((g: any) => (
                 <div key={g.id} className="flex justify-between items-center p-3 border-b border-slate-100 text-sm">
                   <span className="font-medium text-slate-700">{g.concepto}</span>
-                  <span className="font-bold text-slate-900">S/ {Number(g.monto).toFixed(2)}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="font-bold text-slate-900">S/ {Number(g.monto).toFixed(2)}</span>
+                    <button
+                      disabled={isUpdating}
+                      onClick={() => handleEliminarGastoClient(g.id)}
+                      className="text-red-500 hover:text-red-700 p-1 rounded-lg hover:bg-red-50 transition-colors"
+                      title="Eliminar gasto"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
               {allGastos.length === 0 && (
@@ -1124,7 +1242,7 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
             <h2 className="text-lg font-bold text-slate-800 mb-4">Bitácora de Ruta / Incidentes</h2>
             
             <form onSubmit={handleGuardarNovedad} className="bg-slate-50 p-5 rounded-2xl border border-slate-200 mb-6">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de Incidente</label>
                   <select 
@@ -1153,18 +1271,6 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
                     <option>Alta</option>
                   </select>
                 </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Retraso Estimado (min)</label>
-                  <input 
-                    type="number"
-                    min="0"
-                    required
-                    value={novedadForm.retraso_minutos}
-                    onChange={(e) => setNovedadForm({...novedadForm, retraso_minutos: e.target.value})}
-                    className="w-full px-4 py-2 rounded-xl border border-slate-200 outline-none focus:border-[#f07639] bg-white text-sm"
-                  />
-                </div>
               </div>
 
               <div className="mb-4">
@@ -1187,9 +1293,9 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
             <div className="space-y-3">
               <h3 className="text-sm font-bold text-slate-500">Historial de la Bitácora</h3>
               {allNovedades.map((n: any) => (
-                <div key={n.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex justify-between items-start">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 flex-wrap">
+                <div key={n.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex justify-between items-start gap-4">
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="inline-block px-2 py-0.5 rounded bg-slate-200 text-[10px] font-bold text-slate-600 uppercase">{n.tipo}</span>
                       <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                         n.gravedad === 'Alta' 
@@ -1203,11 +1309,45 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
                           Retraso: +{n.retraso_minutos} min
                         </span>
                       )}
+                      {n.solucionado ? (
+                        <span className="inline-block px-2 py-0.5 rounded bg-emerald-100 border border-emerald-200 text-[10px] font-extrabold text-emerald-700">
+                          ✓ SOLUCIONADO
+                        </span>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 rounded bg-amber-100 border border-amber-200 text-[10px] font-extrabold text-amber-800">
+                          ⚠ EN CURSO
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm font-medium text-slate-700">{n.descripcion}</p>
-                    <p className="text-[10px] text-slate-400 font-bold">
-                      {new Date(n.created_at || Date.now()).toLocaleString()}
-                    </p>
+                    <div className="text-[10px] text-slate-400 font-bold space-y-0.5">
+                      <p>Reportado: {new Date(n.created_at || Date.now()).toLocaleString()}</p>
+                      {n.solucionado && n.fecha_solucion && (
+                        <p className="text-emerald-600">Solucionado: {new Date(n.fecha_solucion).toLocaleString()}</p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 shrink-0">
+                    {!n.solucionado && (
+                      <button
+                        disabled={isUpdating}
+                        onClick={() => handleResolverIncidenteClient(n.id)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-emerald-250 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition-all cursor-pointer"
+                        title="Marcar como solucionado"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5" />
+                        <span>Solucionado</span>
+                      </button>
+                    )}
+                    <button
+                      disabled={isUpdating}
+                      onClick={() => handleEliminarBitacoraClient(n.id)}
+                      className="text-red-500 hover:text-red-700 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                      title="Eliminar reporte"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -1219,6 +1359,91 @@ export default function ViajeDetalleConductorClient({ viaje, conductorId }: { vi
         )}
 
       </div>
+
+      {/* Notificación Toast Tipo Nubesita Flotante */}
+      {toast.mostrar && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[99999] flex items-center gap-3 px-4 py-3 bg-white/95 backdrop-blur-md border border-slate-100/80 rounded-2xl shadow-xl animate-fade-in max-w-sm w-[90%] sm:w-auto transition-all duration-300">
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+            toast.tipo === "exito"
+              ? "bg-emerald-50 text-emerald-500 border border-emerald-100"
+              : toast.tipo === "error"
+                ? "bg-red-50 text-red-500 border border-red-100"
+                : toast.tipo === "advertencia"
+                  ? "bg-amber-50 text-amber-500 border border-amber-100"
+                  : "bg-blue-50 text-blue-500 border border-blue-100"
+          }`}>
+            {toast.tipo === "exito" && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            {toast.tipo === "error" && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+            {toast.tipo === "advertencia" && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+            )}
+            {toast.tipo === "info" && (
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
+          </div>
+          
+          <div className="flex-1 text-xs font-black text-slate-700 leading-snug">
+            {toast.mensaje}
+          </div>
+          
+          <button 
+            onClick={() => setToast(prev => ({ ...prev, mostrar: false }))}
+            className="text-slate-400 hover:text-slate-600 shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded hover:bg-slate-50 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Modal de Confirmación Premium Personalizado Centrado */}
+      {modalConfirmar.mostrar && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl p-6 shadow-2xl max-w-sm w-full text-center border border-slate-100 transform scale-100 transition-all duration-300">
+            <div className="flex justify-center mb-4">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center bg-amber-50 text-amber-500 border border-amber-100">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+            </div>
+            
+            <h3 className="text-base font-extrabold text-slate-800 mb-2">
+              ¿Confirmar Acción?
+            </h3>
+            
+            <p className="text-xs text-slate-500 font-bold mb-6 leading-relaxed">
+              {modalConfirmar.mensaje}
+            </p>
+            
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setModalConfirmar(prev => ({ ...prev, mostrar: false }))}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={modalConfirmar.onConfirm}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-slate-800 hover:bg-slate-950 transition-all shadow-sm shadow-slate-900/10 cursor-pointer"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
